@@ -1,6 +1,7 @@
 import { test, expect } from "@playwright/test";
 import { PDFDocument, StandardFonts } from "pdf-lib";
 import { PNG } from "pngjs";
+import { createQpdfImageStreams } from "@lipoe/browser-qpdf";
 import { readFile } from "node:fs/promises";
 
 async function imageHeavyPdf() {
@@ -28,6 +29,15 @@ async function imageHeavyPdf() {
 
 test("balanced compression reduces a scanned-style PDF without flattening pages", async ({ page }) => {
   const source = await imageHeavyPdf();
+  const qpdf = await createQpdfImageStreams();
+  const loaded = qpdf.loadPdf(new Uint8Array(source));
+  if (loaded.ok) {
+    console.log("Image facts:", JSON.stringify(loaded.value.getImages({ recursive: true }).value?.map((x) => ({
+      w: x.width, h: x.height, size: x.streamLength, family: x.colorSpaceInfo?.family,
+      encoding: x.encoding, bits: x.bitsPerComponent, masks: x.masks
+    }))));
+    loaded.value.close();
+  }
   const pageErrors = [];
   page.on("pageerror", (error) => pageErrors.push(error.message));
   await page.goto("/");
@@ -39,6 +49,8 @@ test("balanced compression reduces a scanned-style PDF without flattening pages"
   await page.locator("#compress-level").selectOption("balanced");
   await page.locator("#preview-btn").click();
   await expect(page.locator("#preview-status")).toHaveText("COMPRESSION READY", { timeout: 120_000 });
+  console.log("Compression report:", await page.locator("#compress-stats").textContent());
+  console.log("Size report:", await page.locator("#preview-subsummary").textContent());
   await expect(page.locator("#preview-summary")).toContainText("% smaller");
   await expect(page.locator("#compress-stats")).toContainText("embedded image");
   const [download] = await Promise.all([
