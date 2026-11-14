@@ -872,6 +872,64 @@ function initEvents() {
   });
 }
 
+let pendingInstallPrompt = null;
+
+function initInstallableApp() {
+  const button = $("install-app");
+  const isInstalled = () =>
+    window.matchMedia("(display-mode: standalone)").matches ||
+    window.navigator.standalone === true;
+
+  if (isInstalled()) button.hidden = true;
+
+  window.addEventListener("beforeinstallprompt", (event) => {
+    event.preventDefault();
+    pendingInstallPrompt = event;
+    if (!isInstalled()) button.hidden = false;
+  });
+
+  window.addEventListener("appinstalled", () => {
+    pendingInstallPrompt = null;
+    button.hidden = true;
+    showToast("PDF Cutter was installed on this device.", "success");
+  });
+
+  button.addEventListener("click", async () => {
+    if (isInstalled()) return;
+    if (pendingInstallPrompt) {
+      const prompt = pendingInstallPrompt;
+      pendingInstallPrompt = null;
+      try {
+        await prompt.prompt();
+        const result = await prompt.userChoice;
+        if (result.outcome !== "accepted") {
+          showToast("You can install PDF Cutter later from your browser menu.", "info");
+        }
+      } catch (_) {
+        showToast("Use your browser menu to install this app.", "info");
+      }
+      return;
+    }
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+      (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+    showToast(isIOS
+      ? "On iPhone or iPad, tap Share, then Add to Home Screen."
+      : "Open your browser menu and choose Install app or Add to Home Screen.", "info");
+  });
+
+  // GitHub Pages serves the generated service worker from this app's own path.
+  // Never intercept local PDF data or send document contents to a server.
+  if (import.meta.env.PROD && "serviceWorker" in navigator) {
+    const register = () => {
+      const base = new URL(import.meta.env.BASE_URL, document.baseURI);
+      navigator.serviceWorker.register(new URL("sw.js", base), { scope: base.href })
+        .catch((error) => console.warn("Offline app cache is unavailable:", error));
+    };
+    if (document.readyState === "complete") register();
+    else window.addEventListener("load", register, { once: true });
+  }
+}
+
 function init() {
   try {
     state.remember = localStorage.getItem("pdf-cutter-remember") !== "false";
@@ -880,6 +938,7 @@ function init() {
   }
   $("remember-projects").checked = state.remember;
   initEvents();
+  initInstallableApp();
   loadHistory();
 }
 

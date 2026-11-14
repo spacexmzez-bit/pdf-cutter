@@ -4,6 +4,13 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#f3eee2" />
+    <meta name="application-name" content="PDF Cutter" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="PDF Cutter" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="icon" type="image/png" sizes="192x192" href="./icons/icon-192.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="./icons/apple-touch-icon.png" />
     <meta name="description" content="Cut, preview, and insert marker pages into PDFs privately in your browser." />
     <title>PDF Cutter — A little paper workshop</title>
   </head>
@@ -16,6 +23,7 @@
         </a>
         <div class="topbar-right">
           <button id="font-toggle" class="font-toggle" type="button" aria-pressed="false" aria-label="Switch to a more readable font"><span class="font-glyph" aria-hidden="true">Aa</span><span id="font-toggle-label">Readable font</span></button>
+          <button id="install-app" class="install-app-button" type="button" aria-label="Install PDF Cutter as an app" title="Install PDF Cutter"><span class="install-symbol" aria-hidden="true">↓</span><span class="install-label">Install app</span></button>
           <span class="topbar-proof">made for your browser, not a server</span>
           <span class="local-stamp"><span class="stamp-dot"></span> LOCAL &amp; PRIVATE</span>
         </div>

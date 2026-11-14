@@ -248,3 +248,30 @@ body.readable-font .panel-heading h2, body.readable-font .history-heading h2 { l
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; }
 }
+
+/* Install control: native browser prompt when available, browser-menu guidance otherwise. */
+.install-app-button {
+  display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+  flex: 0 0 auto; padding: 9px 12px;
+  border: 1.7px solid #817b6d; border-radius: 6px;
+  background: #e9edde; color: #3c5140;
+  font: 700 12px Georgia, serif; white-space: nowrap;
+  transition: background .2s, border-color .2s;
+}
+.install-app-button:hover { background: #dce7d4; border-color: #4e604c; }
+.install-app-button .install-symbol { font: 800 16px/1 Georgia, serif; }
+@media (max-width: 750px) {
+  .topbar-proof { display: none; }
+}
+@media (max-width: 650px) {
+  .install-app-button { padding: 8px 9px; font-size: 10px; }
+}
+@media (max-width: 470px) {
+  .install-app-button .install-label { display: none; }
+  .install-app-button .install-symbol { font-size: 18px; }
+  .brand-copy small { display: none; }
+}
+@media (max-width: 380px) {
+  .font-toggle #font-toggle-label { display: none; }
+  .font-toggle { padding: 8px; }
+}
