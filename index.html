@@ -80,6 +80,10 @@
                 <span class="mode-icon marker-icon">＋</span>
                 <span><strong>Add markers</strong><small>Separate your sections</small></span>
               </button>
+              <button id="mode-compress" class="mode-button" type="button" role="tab" aria-selected="false">
+                <span class="mode-icon compress-icon" aria-hidden="true">⇣</span>
+                <span><strong>Compress PDF</strong><small>Make files smaller</small></span>
+              </button>
             </div>
 
             <div class="section-divider"></div>
@@ -131,6 +135,22 @@
               <p class="helper-text">Upload a PDF to use its first page as the marker. Without one, a blank page matching the nearby page size is inserted.</p>
             </div>
 
+            <div id="tool-compress" class="tool-pane" hidden>
+              <div class="field-heading"><label for="compress-level">Compression level</label><span class="field-hint">Local processing</span></div>
+              <select id="compress-level" class="text-input select-input">
+                <option value="lossless">Lossless — preserve image pixels</option>
+                <option value="balanced" selected>Balanced — smaller images, good quality</option>
+                <option value="maximum">Maximum — smallest images, lower quality</option>
+              </select>
+              <p class="helper-text">Lossless optimizes the PDF structure. Balanced and Maximum also recompress compatible embedded images, while keeping text selectable and leaving unsupported images untouched.</p>
+              <p class="helper-text">Results vary by document. No PDF is uploaded. A 256 MB input limit protects browser memory; encrypted PDFs and digital signatures may require special care.</p>
+              <div id="compress-progress-panel" class="compress-progress-panel" role="status" aria-live="polite" hidden>
+                <span id="compress-progress-label">Preparing compression…</span>
+                <progress id="compress-progress" max="100" value="0"></progress>
+                <button id="cancel-compression" class="secondary-button" type="button">Cancel compression</button>
+              </div>
+            </div>
+
             <div class="editor-footer">
               <div class="footer-note"><span class="note-dot"></span><span>Nothing is changed until you create the PDF.</span></div>
               <div class="editor-actions">
@@ -155,18 +175,19 @@
                 <div class="preview-spark">✦</div>
               </div>
               <strong>Your preview will live here.</strong>
-              <p>Upload a PDF, choose the pages, then select <b>Preview result</b> to review the new page order.</p>
-              <div class="preview-steps"><span>1. Upload</span><i>→</i><span>2. Select pages</span><i>→</i><span>3. Preview</span></div>
+              <p id="preview-empty-description">Upload a PDF, choose the pages, then select Preview result to review the new page order.</p>
+              <div class="preview-steps"><span>1. Upload</span><i>→</i><span>2. Choose tool</span><i>→</i><span>3. Preview</span></div>
             </div>
             <div id="preview-content" hidden>
               <div class="preview-summary-row">
                 <div><strong id="preview-summary">0 pages</strong><span id="preview-subsummary">Review the page sequence below</span></div>
                 <span id="preview-status" class="preview-status">PREVIEW READY</span>
               </div>
+              <p id="compress-stats" class="compress-stats" hidden></p>
               <div id="preview-grid" class="preview-grid"></div>
               <p id="preview-overflow" class="preview-overflow" hidden></p>
               <div class="preview-bottom">
-                <div class="signature-warning"><span>ⓘ</span> Editing a digitally signed PDF may invalidate its signature.</div>
+                <div class="signature-warning"><span>ⓘ</span> Editing or compressing a signed PDF may invalidate its signature. Keep the original.</div>
                 <button id="create-btn" class="primary-button create-button" type="button" disabled>Create &amp; download PDF <span aria-hidden="true">↓</span></button>
               </div>
             </div>

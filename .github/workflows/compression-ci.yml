@@ -1,0 +1,34 @@
+name: PDF compression checks
+
+on:
+  push:
+    branches: [main, feature/local-pdf-compression]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install dependencies
+        run: npm install
+      - name: Test PDF compression engine
+        run: npm test
+      - name: Build production PWA
+        run: npm run build
+      - name: Verify bundled compression engine and offline shell
+        run: |
+          test -f dist/index.html
+          test -f dist/sw.js
+          test -f dist/manifest.webmanifest
+          find dist/assets -name '*.wasm' | grep -q .
+          grep -q 'mode-compress' dist/index.html

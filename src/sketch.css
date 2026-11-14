@@ -275,3 +275,37 @@ body.readable-font .panel-heading h2, body.readable-font .history-heading h2 { l
   .font-toggle #font-toggle-label { display: none; }
   .font-toggle { padding: 8px; }
 }
+
+/* The third workbench tool follows the same pencil-sketch language. */
+.mode-switch { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.mode-button { min-width: 0; }
+.mode-button small { overflow-wrap: anywhere; }
+.compress-icon { color: var(--red); font-size: 27px; }
+.compress-progress-panel {
+  display: flex; flex-direction: column; gap: 10px;
+  padding: 13px 14px; margin-top: 16px;
+  border: 1.5px dashed #9c9686; border-radius: 7px;
+  background: #f7f2e6; color: var(--ink);
+  font: 12px/1.6 Georgia, serif;
+}
+.compress-progress-panel[hidden], .compress-stats[hidden] { display: none !important; }
+.compress-progress-panel progress {
+  width: 100%; height: 12px; border: 1px solid #88806e;
+  border-radius: 4px; overflow: hidden; accent-color: var(--green);
+}
+.compress-progress-panel progress::-webkit-progress-bar { background: #e5dfd0; }
+.compress-progress-panel progress::-webkit-progress-value { background: var(--green); }
+.compress-progress-panel .secondary-button { align-self: flex-start; }
+.compress-stats {
+  margin: 0 0 14px; padding: 11px 12px;
+  border: 1px dashed #9e9987; border-radius: 5px;
+  color: #5b5a50; background: #f6f1e6;
+  font: italic 12px/1.6 Georgia, serif;
+}
+@media (max-width: 650px) {
+  .mode-switch { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .mode-button { min-height: 94px; flex-direction: column; align-items: flex-start; gap: 7px; }
+  .mode-icon { flex: 0 0 29px; }
+  .mode-button strong { font-size: 10px; }
+  .mode-button small { font-size: 9px; line-height: 1.3; }
+}

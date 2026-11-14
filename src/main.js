@@ -25,6 +25,8 @@ const state = {
   currentRecord: null,
   preview: null,
   previewObserver: null,
+  compressedPreviewDoc: null,
+  compressionCancel: null,
   remember: true,
   busy: false
 };
@@ -46,7 +48,7 @@ function setBusy(busy, message) {
   state.busy = busy;
   $("preview-btn").disabled = busy || !state.sourceDoc;
   $("create-btn").disabled = busy || !state.preview;
-  ["mode-cut", "mode-marker", "source-file", "marker-file-input", "cut-pages", "marker-pages", "marker-position", "choose-marker", "replace-file", "reset-btn"].forEach((id) => {
+  ["mode-cut", "mode-marker", "mode-compress", "source-file", "marker-file-input", "cut-pages", "marker-pages", "marker-position", "compress-level", "choose-marker", "replace-file", "reset-btn"].forEach((id) => {
     const control = $(id);
     if (control) control.disabled = busy;
   });
@@ -186,6 +188,11 @@ function setResultReady(record) {
 
 function invalidatePreview() {
   state.preview = null;
+  if (state.compressedPreviewDoc) {
+    state.compressedPreviewDoc.destroy().catch(() => {});
+    state.compressedPreviewDoc = null;
+  }
+  $("compress-stats").hidden = true;
   if (state.previewObserver) {
     state.previewObserver.disconnect();
     state.previewObserver = null;
@@ -197,14 +204,16 @@ function invalidatePreview() {
 }
 
 function setMode(mode) {
-  state.mode = mode === "marker" ? "marker" : "cut";
-  const isCut = state.mode === "cut";
-  $("mode-cut").classList.toggle("active", isCut);
-  $("mode-marker").classList.toggle("active", !isCut);
-  $("mode-cut").setAttribute("aria-selected", String(isCut));
-  $("mode-marker").setAttribute("aria-selected", String(!isCut));
-  $("tool-cut").hidden = !isCut;
-  $("tool-marker").hidden = isCut;
+  state.mode = ["cut", "marker", "compress"].includes(mode) ? mode : "cut";
+  for (const option of ["cut", "marker", "compress"]) {
+    const active = state.mode === option;
+    $("mode-" + option).classList.toggle("active", active);
+    $("mode-" + option).setAttribute("aria-selected", String(active));
+    $("tool-" + option).hidden = !active;
+  }
+  $("preview-empty-description").textContent = state.mode === "compress"
+    ? "Upload a PDF, choose a compression level, then preview the smaller result before downloading."
+    : "Upload a PDF, choose the pages, then select Preview result to review the new page order.";
   invalidatePreview();
   if (state.currentRecord) state.currentRecord.operation = state.mode;
 }
@@ -278,7 +287,9 @@ function createPreviewEntries(pages, mode, position) {
 }
 
 async function renderEntry(entry, canvas) {
-  const documentToRender = entry.type === "marker" ? state.markerDoc : state.sourceDoc;
+  const documentToRender = entry.type === "marker" ? state.markerDoc
+    : entry.type === "compressed" ? (state.compressedPreviewDoc || state.sourceDoc)
+    : state.sourceDoc;
   if (!documentToRender) return;
   const page = await documentToRender.getPage(entry.pageNumber);
   const viewport = page.getViewport({ scale: 0.48 });
@@ -325,9 +336,9 @@ function renderPreviewGrid(entries) {
     const caption = document.createElement("div");
     caption.className = "page-caption";
     const pageLabel = document.createElement("strong");
-    pageLabel.textContent = entry.type === "source" ? "Page " + entry.pageNumber : "Marker";
+    pageLabel.textContent = entry.type === "marker" || entry.type === "blank" ? "Marker" : "Page " + entry.pageNumber;
     const detail = document.createElement("span");
-    detail.textContent = entry.type === "source" ? "Original" : entry.label;
+    detail.textContent = entry.type === "source" ? "Original" : entry.type === "compressed" ? "Compressed" : entry.label;
     caption.append(pageLabel, detail);
     card.append(media, caption);
     fragment.appendChild(card);
@@ -386,7 +397,8 @@ async function saveCurrentProject() {
   record.operation = state.mode;
   record.updatedAt = Date.now();
   record.markerFileName = state.markerFileName || "";
-  record.pageSpec = state.mode === "cut" ? $("cut-pages").value : $("marker-pages").value;
+  record.pageSpec = state.mode === "cut" ? $("cut-pages").value : state.mode === "marker" ? $("marker-pages").value : "";
+  record.compressionLevel = $("compress-level").value;
   record.markerPosition = $("marker-position").value;
   try {
     await putRecord(record);
@@ -398,12 +410,103 @@ async function saveCurrentProject() {
   }
 }
 
+
+function runCompressionWorker(sourceBytes, level, onProgress) {
+  return new Promise((resolve, reject) => {
+    const worker = new Worker(new URL("./compress.worker.js", import.meta.url), { type: "module" });
+    let finished = false;
+    const finish = (error, result) => {
+      if (finished) return;
+      finished = true;
+      worker.terminate();
+      state.compressionCancel = null;
+      if (error) reject(error);
+      else resolve(result);
+    };
+    state.compressionCancel = () => finish(new Error("Compression cancelled. Your original PDF is unchanged."));
+    worker.onerror = (event) => finish(new Error(event.message || "Compression worker could not start."));
+    worker.onmessage = (event) => {
+      const data = event.data;
+      if (data.type === "progress") {
+        onProgress(data);
+      } else if (data.type === "error") {
+        finish(new Error(data.message));
+      } else if (data.type === "done") {
+        finish(null, { ...data, bytes: new Uint8Array(data.bytes) });
+      }
+    };
+    const input = sourceBytes.slice().buffer;
+    worker.postMessage({ bytes: input, level }, [input]);
+  });
+}
+
+async function makeCompressionPreview() {
+  invalidatePreview();
+  try {
+    setBusy(true, "Compressing PDF…");
+    $("compress-progress-panel").hidden = false;
+    $("compress-progress").value = 0;
+    $("compress-progress-label").textContent = "Preparing the local compression engine…";
+    const level = $("compress-level").value;
+    const result = await runCompressionWorker(state.sourceBytes, level, (progress) => {
+      $("compress-progress").value = progress.percent;
+      $("compress-progress-label").textContent = progress.stage;
+    });
+    let compressedDoc = null;
+    if (!result.usedOriginal) {
+      compressedDoc = await loadPdfDocument(result.bytes);
+      if (compressedDoc.numPages !== state.pageCount) {
+        await compressedDoc.destroy();
+        throw new Error("The optimized PDF failed page-count validation. No result was saved.");
+      }
+    }
+    state.compressedPreviewDoc = compressedDoc;
+    const entries = Array.from({ length: state.pageCount }, (_, i) => ({
+      type: "compressed", pageNumber: i + 1, label: "Output page " + (i + 1)
+    }));
+    state.preview = {
+      mode: "compress", compressedBytes: result.bytes, quality: level,
+      entries, pages: [], position: "", pageSpec: ""
+    };
+    const savings = result.originalSize - result.outputSize;
+    const percent = (100 * savings / result.originalSize).toFixed(1);
+    $("preview-empty").hidden = true;
+    $("preview-content").hidden = false;
+    $("preview-summary").textContent = savings ? percent + "% smaller" : "Already optimized";
+    $("preview-subsummary").textContent = formatBytes(result.originalSize) + " → " +
+      formatBytes(result.outputSize) + " · " + state.pageCount + " pages";
+    $("preview-status").textContent = "COMPRESSION READY";
+    $("compress-stats").hidden = false;
+    $("compress-stats").textContent = result.note ||
+      (level === "lossless"
+        ? "Lossless structural optimization; original image pixels preserved."
+        : result.imagesChanged + " embedded image(s) optimized. Text and page objects were not rasterized.");
+    renderPreviewGrid(entries);
+    $("create-btn").disabled = false;
+    await saveCurrentProject();
+    showToast(savings
+      ? "Compressed PDF ready. Review it before downloading."
+      : "No smaller safe result found. The original PDF will be downloaded.", "success");
+  } catch (error) {
+    state.preview = null;
+    $("create-btn").disabled = true;
+    showToast(error.message || "Compression failed. Your original PDF is unchanged.", "error");
+  } finally {
+    $("compress-progress-panel").hidden = true;
+    setBusy(false);
+  }
+}
+
 async function makePreview() {
   if (!state.sourceDoc || !state.sourceBytes) {
     showToast("Choose a source PDF first.", "error");
     return;
   }
 
+  if (state.mode === "compress") {
+    await makeCompressionPreview();
+    return;
+  }
   try {
     setBusy(true, "Preparing preview…");
     const raw = state.mode === "cut" ? $("cut-pages").value : $("marker-pages").value;
@@ -460,9 +563,16 @@ async function createOutput() {
   try {
     setBusy(true, "Creating PDF…");
     $("create-btn").textContent = "Creating PDF…";
+    let outputName = "";
+    let resultBytes;
+    let outputPageCount;
+    if (preview.mode === "compress") {
+      resultBytes = preview.compressedBytes.slice();
+      outputName = baseName(state.fileName) + "-compressed.pdf";
+      outputPageCount = state.pageCount;
+    } else {
     const sourceDocument = await PDFDocument.load(state.sourceBytes.slice());
     const output = await PDFDocument.create();
-    let outputName = "";
 
     if (preview.mode === "cut") {
       const indexes = preview.pages.map((page) => page - 1);
@@ -488,7 +598,9 @@ async function createOutput() {
     }
 
     const savedBytes = await output.save();
-    const resultBytes = new Uint8Array(savedBytes);
+    resultBytes = new Uint8Array(savedBytes);
+    outputPageCount = output.getPageCount();
+    }
     if (!state.currentRecord) {
       state.currentRecord = {
         id: (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + "-" + Math.random().toString(16).slice(2)),
@@ -500,7 +612,8 @@ async function createOutput() {
     state.currentRecord.operation = preview.mode;
     state.currentRecord.pageSpec = preview.pageSpec;
     state.currentRecord.markerPosition = preview.position;
-    state.currentRecord.outputPageCount = output.getPageCount();
+    state.currentRecord.outputPageCount = outputPageCount;
+    state.currentRecord.compressionLevel = preview.quality || null;
     state.currentRecord.updatedAt = Date.now();
 
     setResultReady(state.currentRecord);
@@ -645,7 +758,7 @@ async function loadHistory() {
       const title = document.createElement("strong");
       title.textContent = record.fileName || "Untitled PDF";
       const detail = document.createElement("span");
-      const operation = record.operation === "marker" ? "PDF marker" : "PDF cutter";
+      const operation = record.operation === "marker" ? "PDF marker" : record.operation === "compress" ? "PDF compressor" : "PDF cutter";
       detail.textContent = operation + " · " + (record.pageCount || "—") + " original pages · " + formatDate(record.updatedAt || record.createdAt);
       copy.append(title, detail);
 
@@ -722,6 +835,7 @@ async function openSavedProject(id) {
     $("cut-pages").value = record.operation === "cut" ? (record.pageSpec || "1-" + state.pageCount) : "1-" + state.pageCount;
     $("marker-pages").value = record.operation === "marker" ? (record.pageSpec || "1") : "1";
     $("marker-position").value = record.markerPosition || "before";
+    $("compress-level").value = record.compressionLevel || "balanced";
     $("file-meta").hidden = false;
     $("file-name").textContent = state.fileName;
     $("file-info").textContent = state.pageCount + " pages · saved locally";
@@ -753,12 +867,15 @@ function resetWorkspace() {
   state.markerFileName = "";
   state.currentRecord = null;
   state.preview = null;
+  if (state.compressedPreviewDoc) state.compressedPreviewDoc.destroy().catch(() => {});
+  state.compressedPreviewDoc = null;
 
   $("source-file").value = "";
   $("marker-file-input").value = "";
   $("file-meta").hidden = true;
   $("cut-pages").value = "1-3";
   $("marker-pages").value = "1";
+  $("compress-level").value = "balanced";
   $("marker-file-label").textContent = "A blank page is used by default";
   $("marker-file-label").classList.remove("has-file");
   $("preview-grid").replaceChildren();
@@ -781,6 +898,7 @@ function initEvents() {
   });
   $("mode-cut").addEventListener("click", () => setMode("cut"));
   $("mode-marker").addEventListener("click", () => setMode("marker"));
+  $("mode-compress").addEventListener("click", () => setMode("compress"));
 
   $("dropzone").addEventListener("click", (event) => {
     if (event.target.id !== "source-file") showFilePicker();
@@ -825,6 +943,8 @@ function initEvents() {
   $("cut-pages").addEventListener("input", invalidatePreview);
   $("marker-pages").addEventListener("input", invalidatePreview);
   $("marker-position").addEventListener("change", invalidatePreview);
+  $("compress-level").addEventListener("change", invalidatePreview);
+  $("cancel-compression").addEventListener("click", () => state.compressionCancel?.());
 
   document.querySelectorAll(".example-chip").forEach((button) => {
     button.addEventListener("click", () => {

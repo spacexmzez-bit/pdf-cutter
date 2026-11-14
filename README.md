@@ -4,6 +4,7 @@ A browser-based PDF utility for extracting selected pages and inserting marker p
 
 ## Features
 
+- **PDF compressor:** lossless structural optimization or balanced/maximum embedded-image compression, with before/after size, a page preview, and a no-growth safeguard. Uses the qpdf WebAssembly engine locally, without rasterizing whole pages.
 - **PDF cutter:** keep individual pages, ranges, or multiple ranges such as 1-37, 88-119.
 - **Preview before creating:** inspect the selected page sequence before downloading the result.
 - **PDF marker:** insert a marker before or after each selected original page while keeping all original pages.
@@ -12,11 +13,20 @@ A browser-based PDF utility for extracting selected pages and inserting marker p
 - **Installable web app (PWA):** install PDF Cutter from supported browser menus or the site's Install app control. The app shell and bundled PDF engine are cached for offline use after a successful first load.
 - **Responsive interface:** works on desktop and mobile browsers.
 
+## Compression design
+
+The compressor runs **qpdf WebAssembly** in a dedicated browser worker. Lossless mode rewrites the PDF structure without changing image pixels. Balanced and Maximum additionally re-encode compatible embedded RGB/grayscale images as JPEG, with optional downsampling. Text, links, and other PDF objects are not flattened into page images.
+
+**Limits:** Not every PDF becomes smaller. If the optimized result is not smaller, the original bytes are kept. Unsupported, masked, ICC/CMYK, JPEG2000, JBIG2, and complex image encodings are left untouched. Very large or complex PDFs can exceed browser memory; the compressor limits input files to 256 MB. Rewriting a digitally signed PDF can invalidate signatures. Always inspect the preview before downloading, and retain the original document. PDF metadata and complex interactive features should be verified on important documents.
+
+The image stream engine is [@lipoe/browser-qpdf](https://github.com/lipoe/browser-qpdf) v0.3.1 (Apache-2.0), based on qpdf 12.4.2. Redistribution notices are included under `public/licenses/`. The rest of PDF Cutter remains MIT-licensed.
+
 ## Run locally
 
 1. Install Node.js 20 or newer.
 2. Install project dependencies with npm install.
-3. Start the development server with npm run dev.
+3. Run tests with npm test.
+4. Start the development server with npm run dev.
 4. Open the local address printed by Vite.
 
 Create a production build with npm run build. The generated static site is placed in dist.
@@ -49,7 +59,7 @@ The production build generates a versioned service worker that caches the static
 
 ## Technology
 
-Vite, PDF.js, pdf-lib, and IndexedDB. All document operations are client-side.
+Vite, PDF.js, pdf-lib, qpdf WebAssembly, Web Workers, and IndexedDB. All document operations are client-side.
 
 ## License
 
