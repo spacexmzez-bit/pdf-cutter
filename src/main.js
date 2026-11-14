@@ -45,7 +45,10 @@ function setBusy(busy, message) {
   state.busy = busy;
   $("preview-btn").disabled = busy || !state.sourceDoc;
   $("create-btn").disabled = busy || !state.preview;
-  $("reset-btn").disabled = busy;
+  ["mode-cut", "mode-marker", "source-file", "marker-file-input", "cut-pages", "marker-pages", "marker-position", "choose-marker", "replace-file", "reset-btn"].forEach((id) => {
+    const control = $(id);
+    if (control) control.disabled = busy;
+  });
   $("preview-btn").classList.toggle("loading", busy && Boolean(message));
   if (message) $("preview-btn").textContent = message;
   else $("preview-btn").innerHTML = 'Preview result <span aria-hidden="true">→</span>';
@@ -452,30 +455,31 @@ async function createOutput() {
     return;
   }
 
+  const preview = state.preview;
   try {
-    $("create-btn").disabled = true;
+    setBusy(true, "Creating PDF…");
     $("create-btn").textContent = "Creating PDF…";
     const sourceDocument = await PDFDocument.load(state.sourceBytes.slice());
     const output = await PDFDocument.create();
     let outputName = "";
 
-    if (state.preview.mode === "cut") {
-      const indexes = state.preview.pages.map((page) => page - 1);
+    if (preview.mode === "cut") {
+      const indexes = preview.pages.map((page) => page - 1);
       const copiedPages = await output.copyPages(sourceDocument, indexes);
       copiedPages.forEach((page) => output.addPage(page));
       outputName = baseName(state.fileName) + "-cut.pdf";
     } else {
       const markerDocument = state.markerBytes ? await PDFDocument.load(state.markerBytes.slice()) : null;
       const originalPages = await output.copyPages(sourceDocument, sourceDocument.getPageIndices());
-      const selected = new Set(state.preview.pages);
+      const selected = new Set(preview.pages);
 
       for (let index = 0; index < originalPages.length; index += 1) {
         const pageNumber = index + 1;
-        if (selected.has(pageNumber) && state.preview.position === "before") {
+        if (selected.has(pageNumber) && preview.position === "before") {
           await createMarkerPage(output, markerDocument, sourceDocument, index);
         }
         output.addPage(originalPages[index]);
-        if (selected.has(pageNumber) && state.preview.position === "after") {
+        if (selected.has(pageNumber) && preview.position === "after") {
           await createMarkerPage(output, markerDocument, sourceDocument, index);
         }
       }
@@ -492,9 +496,9 @@ async function createOutput() {
     }
     state.currentRecord.outputBytes = resultBytes;
     state.currentRecord.outputName = outputName;
-    state.currentRecord.operation = state.preview.mode;
-    state.currentRecord.pageSpec = state.preview.pageSpec;
-    state.currentRecord.markerPosition = state.preview.position;
+    state.currentRecord.operation = preview.mode;
+    state.currentRecord.pageSpec = preview.pageSpec;
+    state.currentRecord.markerPosition = preview.position;
     state.currentRecord.outputPageCount = output.getPageCount();
     state.currentRecord.updatedAt = Date.now();
 
@@ -506,6 +510,7 @@ async function createOutput() {
     console.error(error);
     showToast(error.message || "Could not create this PDF. It may be encrypted or damaged.", "error");
   } finally {
+    setBusy(false);
     $("create-btn").innerHTML = 'Create &amp; download PDF <span aria-hidden="true">↓</span>';
     $("create-btn").disabled = !state.preview;
   }
@@ -541,6 +546,7 @@ async function handleSourceFile(file) {
     state.markerBytes = null;
     state.markerDoc = null;
     state.markerFileName = "";
+    $("marker-file-input").value = "";
     state.currentRecord = {
       id: (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + "-" + Math.random().toString(16).slice(2)),
       fileName: file.name,
@@ -560,7 +566,6 @@ async function handleSourceFile(file) {
     $("marker-pages").value = "1";
     $("marker-file-label").textContent = "A blank page is used by default";
     $("marker-file-label").classList.remove("has-file");
-    $("marker-file-meta").hidden = true;
     $("preview-btn").disabled = false;
     setResultReady(null);
     invalidatePreview();
