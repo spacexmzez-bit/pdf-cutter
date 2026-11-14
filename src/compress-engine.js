@@ -140,7 +140,8 @@ export async function compressPdfBytes(source, level, onProgress = () => {}, was
     const improved = optimized.length < source.length;
     const result = improved ? optimized : source.slice();
     if (!improved) {
-      note = note || "No smaller safe result was found; your original PDF is kept unchanged.";
+      note = note || ("No smaller safe result was found; your original PDF is kept unchanged." +
+        (level === "lossless" ? "" : " " + imagesChanged + " image(s) re-encoded, " + imagesSkipped + " skipped."));
     }
     onProgress({ stage: "Compression complete", percent: 100 });
     return {

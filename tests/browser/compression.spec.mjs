@@ -7,13 +7,14 @@ import { readFile } from "node:fs/promises";
 async function imageHeavyPdf() {
   const width = 1280, height = 960;
   const png = new PNG({ width, height });
+  let seed = 0x12345678;
+  const randomByte = () => { seed ^= seed << 13; seed ^= seed >>> 17; seed ^= seed << 5; return seed & 255; };
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
       const i = (y * width + x) * 4;
-      const noise = ((x * 71 + y * 97) ^ (x * y * 3)) & 255;
-      png.data[i] = noise;
-      png.data[i + 1] = (noise * 3 + x) & 255;
-      png.data[i + 2] = (noise * 5 + y) & 255;
+      png.data[i] = randomByte();
+      png.data[i + 1] = randomByte();
+      png.data[i + 2] = randomByte();
       png.data[i + 3] = 255;
     }
   }
