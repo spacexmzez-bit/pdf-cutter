@@ -530,6 +530,9 @@ async function handleSourceFile(file) {
 
   try {
     setBusy(true, "Loading PDF…");
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const documentToLoad = await loadPdfDocument(bytes);
+
     if (state.sourceDoc) {
       try { await state.sourceDoc.destroy(); } catch (_) {}
     }
@@ -537,8 +540,6 @@ async function handleSourceFile(file) {
       try { await state.markerDoc.destroy(); } catch (_) {}
     }
 
-    const bytes = new Uint8Array(await file.arrayBuffer());
-    const documentToLoad = await loadPdfDocument(bytes);
     state.sourceBytes = bytes;
     state.sourceDoc = documentToLoad;
     state.fileName = file.name;
