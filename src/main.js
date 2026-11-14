@@ -2,6 +2,7 @@ import { PDFDocument } from "pdf-lib";
 import * as pdfjsLib from "pdfjs-dist";
 import pdfWorker from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import "./styles.css";
+import "./sketch.css";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
 
@@ -771,6 +772,13 @@ function resetWorkspace() {
 }
 
 function initEvents() {
+  // The hand-lettered sketch style is the default; this toggles typography only.
+  $("font-toggle").addEventListener("click", () => {
+    const readable = document.body.classList.toggle("readable-font");
+    $("font-toggle").setAttribute("aria-pressed", String(readable));
+    $("font-toggle").setAttribute("aria-label", readable ? "Switch back to sketch font" : "Switch to a more readable font");
+    $("font-toggle-label").textContent = readable ? "Sketch font" : "Readable font";
+  });
   $("mode-cut").addEventListener("click", () => setMode("cut"));
   $("mode-marker").addEventListener("click", () => setMode("marker"));
 
