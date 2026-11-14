@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "vite build && node scripts/generate-sw.mjs",
     "preview": "vite preview",
-    "test": "node --test tests/*.test.mjs"
+    "test": "node --test tests/*.test.mjs",
+    "test:browser": "playwright test"
   },
   "dependencies": {
     "pdf-lib": "1.17.1",
@@ -15,6 +16,8 @@
     "@lipoe/browser-qpdf": "0.3.1"
   },
   "devDependencies": {
-    "vite": "6.0.11"
+    "vite": "6.0.11",
+    "@playwright/test": "1.56.1",
+    "pngjs": "7.0.0"
   }
 }

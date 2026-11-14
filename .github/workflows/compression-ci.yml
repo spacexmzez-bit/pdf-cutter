@@ -25,6 +25,10 @@ jobs:
         run: npm test
       - name: Build production PWA
         run: npm run build
+      - name: Install Chromium for browser integration tests
+        run: npx playwright install --with-deps chromium
+      - name: Test real compression in Chromium
+        run: npm run test:browser
       - name: Verify bundled compression engine and offline shell
         run: |
           test -f dist/index.html
