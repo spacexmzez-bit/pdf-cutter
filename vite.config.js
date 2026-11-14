@@ -3,6 +3,7 @@ import { defineConfig } from "vite";
 export default defineConfig({
   base: "./",
   assetsInclude: ["**/*.wasm"],
+  worker: { format: "es" },
   optimizeDeps: { exclude: ["@lipoe/browser-qpdf"] },
   build: {
     target: "es2022",
