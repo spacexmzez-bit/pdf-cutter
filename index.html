@@ -84,6 +84,10 @@
                 <span class="mode-icon compress-icon" aria-hidden="true">⇣</span>
                 <span><strong>Compress PDF</strong><small>Make files smaller</small></span>
               </button>
+              <button id="mode-multi-cut" class="mode-button" type="button" role="tab" aria-selected="false">
+                <span class="mode-icon multi-cut-icon" aria-hidden="true">▤</span>
+                <span><strong>Multiple cuts</strong><small>Split into named pieces</small></span>
+              </button>
             </div>
 
             <div class="section-divider"></div>
@@ -115,6 +119,31 @@
                 <button type="button" class="example-chip" data-target="cut-pages" data-value="1, 4, 7">1, 4, 7</button>
                 <button type="button" class="example-chip" data-target="cut-pages" data-value="1-37, 88-119">1–37, 88–119</button>
               </div>
+            </div>
+
+            <div id="tool-multi-cut" class="tool-pane multi-cut-pane" hidden>
+              <div class="field-heading">
+                <label>Import piece definitions</label>
+                <span class="field-hint">JSON · two fields per piece</span>
+              </div>
+              <div class="multi-json-actions">
+                <button id="copy-multi-json" class="secondary-button" type="button">Copy JSON format</button>
+                <button id="choose-multi-json" class="secondary-button" type="button">Import JSON file</button>
+                <input id="multi-json-file" type="file" accept=".json,application/json,text/json" hidden />
+              </div>
+              <textarea id="multi-json-text" class="text-input multi-json-text" rows="5" spellcheck="false" placeholder='[
+  { "part_name": "Part 1", "pages_range": "1-25" },
+  { "part_name": "Part 2", "pages_range": "1, 26-50" }
+]'></textarea>
+              <button id="import-multi-json" class="secondary-button import-json-button" type="button">Import JSON text</button>
+              <p class="helper-text">Each item must contain exactly <code>part_name</code> and <code>pages_range</code>. Page ranges accept single pages and multiple ranges, for example <code>1-4, 76, 88-100</code>. Overlapping pages between pieces are allowed.</p>
+
+              <div class="multi-parts-heading">
+                <div class="field-heading"><label>Output pieces</label><span class="field-hint">Up to 50 pieces</span></div>
+                <button id="add-multi-part" class="secondary-button" type="button"><span>＋</span> Add piece</button>
+              </div>
+              <div id="multi-parts-list" class="multi-parts-list"></div>
+              <p class="helper-text">Each piece becomes a separate PDF. Its file name will be the original file name followed by the piece name.</p>
             </div>
 
             <div id="tool-marker" class="tool-pane" hidden>
@@ -179,6 +208,10 @@
               <div class="preview-steps"><span>1. Upload</span><i>→</i><span>2. Choose tool</span><i>→</i><span>3. Preview</span></div>
             </div>
             <div id="preview-content" hidden>
+              <div id="multi-preview-selector-wrap" class="multi-preview-selector-wrap" hidden>
+                <label for="multi-preview-select">Preview one piece</label>
+                <select id="multi-preview-select" class="text-input select-input"></select>
+              </div>
               <div class="preview-summary-row">
                 <div><strong id="preview-summary">0 pages</strong><span id="preview-subsummary">Review the page sequence below</span></div>
                 <span id="preview-status" class="preview-status">PREVIEW READY</span>
@@ -195,6 +228,13 @@
               <div class="result-check">✓</div>
               <div class="result-copy"><strong>Your PDF is ready</strong><span id="result-name">output.pdf</span></div>
               <button id="download-again" class="secondary-button" type="button">Download again ↓</button>
+            </div>
+            <div id="multi-result-ready" class="multi-result-ready" hidden>
+              <div class="multi-results-heading">
+                <div><strong id="multi-result-summary">0 pieces generated</strong><span>Download each PDF separately or collect all pieces in one ZIP.</span></div>
+                <button id="download-multi-zip" class="primary-button" type="button">Download all as ZIP ↓</button>
+              </div>
+              <div id="multi-results-list" class="multi-results-list"></div>
             </div>
           </section>
         </div>

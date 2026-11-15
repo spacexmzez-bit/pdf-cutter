@@ -309,3 +309,89 @@ body.readable-font .panel-heading h2, body.readable-font .history-heading h2 { l
   .mode-button strong { font-size: 10px; }
   .mode-button small { font-size: 9px; line-height: 1.3; }
 }
+
+
+/* Multiple Cuts: named output pieces, JSON import, and one-at-a-time preview. */
+.mode-switch { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.mode-button { min-width: 0; }
+.multi-cut-icon { color: var(--red); font-size: 23px; }
+.multi-cut-pane { min-height: 220px; }
+.multi-json-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+.multi-json-text {
+  display: block; width: 100%; min-height: 116px; padding: 11px 12px;
+  resize: vertical; font: 12px/1.55 ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+.import-json-button { margin-top: 9px; }
+.multi-parts-heading {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; margin-top: 22px;
+}
+.multi-parts-heading .field-heading { margin-bottom: 0; }
+.multi-parts-list { display: grid; gap: 10px; margin-top: 12px; }
+.multi-part-row {
+  display: grid; grid-template-columns: minmax(0, .85fr) minmax(0, 1.35fr) auto;
+  align-items: end; gap: 10px; padding: 12px;
+  border: 1.5px dashed #aaa391; border-radius: 6px;
+  background: rgba(255,253,245,.72);
+}
+.multi-part-field { display: grid; gap: 6px; min-width: 0; }
+.multi-part-field label {
+  color: var(--ink); font: 700 11px "Segoe Print", cursive;
+}
+.multi-part-field input { width: 100%; min-width: 0; min-height: 40px; font-size: 13px; }
+.multi-part-remove {
+  min-width: 38px; min-height: 39px; padding: 5px 9px;
+  border: 1.5px solid #b28d80; border-radius: 4px;
+  background: #f7eae3; color: #8a4436; font-size: 18px;
+}
+.multi-part-remove:hover { background: #f1dcd2; }
+.multi-parts-empty { padding: 14px; border: 1px dashed #b8b3a6; color: var(--soft); font: italic 12px Georgia,serif; text-align: center; }
+.multi-preview-selector-wrap {
+  display: grid; grid-template-columns: auto minmax(0, 1fr);
+  align-items: center; gap: 12px; margin: 0 0 15px;
+}
+.multi-preview-selector-wrap[hidden] { display: none !important; }
+.multi-preview-selector-wrap label { color: var(--ink); font: 700 12px "Segoe Print", cursive; }
+.multi-preview-selector-wrap select { min-width: 0; min-height: 40px; }
+.multi-result-ready {
+  margin-top: 17px; padding: 15px;
+  border: 1.8px solid #6e7564; border-radius: 6px;
+  background: #f2f1e5;
+}
+.multi-result-ready[hidden] { display: none !important; }
+.multi-results-heading {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 14px; margin-bottom: 12px;
+}
+.multi-results-heading > div { display: grid; gap: 4px; min-width: 0; }
+.multi-results-heading strong { color: var(--ink); font: 700 14px "Segoe Print", cursive; }
+.multi-results-heading span { color: var(--soft); font: italic 11px/1.45 Georgia,serif; }
+.multi-results-heading .primary-button { flex: 0 0 auto; }
+.multi-results-list { display: grid; gap: 7px; }
+.multi-result-item {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; padding: 9px 10px; border-top: 1px dashed #b7b19f;
+}
+.multi-result-name { min-width: 0; display: grid; gap: 3px; }
+.multi-result-name strong { overflow-wrap: anywhere; color: var(--ink); font: 700 11px "Segoe Print", cursive; }
+.multi-result-name span { color: var(--soft); font: italic 10px Georgia,serif; }
+.multi-result-item .secondary-button { flex: 0 0 auto; }
+@media (max-width: 900px) {
+  .mode-switch { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 650px) {
+  .mode-switch { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .mode-button { min-height: 88px; flex-direction: column; align-items: flex-start; gap: 7px; }
+  .mode-icon { flex: 0 0 29px; }
+  .multi-part-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr) auto; gap: 7px; padding: 9px; }
+  .multi-part-field label { font-size: 10px; }
+  .multi-part-field input { font-size: 11px; padding: 0 8px; }
+  .multi-results-heading { align-items: flex-start; flex-direction: column; }
+  .multi-preview-selector-wrap { grid-template-columns: 1fr; gap: 6px; }
+}
+@media (max-width: 390px) {
+  .multi-part-row { grid-template-columns: 1fr; }
+  .multi-part-remove { justify-self: end; min-height: 32px; }
+  .multi-json-actions > button { flex: 1 1 100%; }
+  .multi-preview-selector-wrap { grid-template-columns: 1fr; }
+}

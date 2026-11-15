@@ -1,4 +1,6 @@
 import { PDFDocument } from "pdf-lib";
+import { zipSync } from "fflate";
+import { createMultiOutputName, parseMultiCutsJson, validateMultiParts } from "./multi-cuts.js";
 import * as pdfjsLib from "pdfjs-dist";
 import pdfWorker from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import "./styles.css";
@@ -27,6 +29,8 @@ const state = {
   previewObserver: null,
   compressedPreviewDoc: null,
   compressionCancel: null,
+  multiParts: [],
+  multiResults: [],
   remember: true,
   busy: false
 };
@@ -48,14 +52,21 @@ function setBusy(busy, message) {
   state.busy = busy;
   $("preview-btn").disabled = busy || !state.sourceDoc;
   $("create-btn").disabled = busy || !state.preview;
-  ["mode-cut", "mode-marker", "mode-compress", "source-file", "marker-file-input", "cut-pages", "marker-pages", "marker-position", "compress-level", "choose-marker", "replace-file", "reset-btn"].forEach((id) => {
+  ["mode-cut", "mode-marker", "mode-compress", "mode-multi-cut", "source-file", "marker-file-input", "multi-json-file", "multi-json-text", "copy-multi-json", "choose-multi-json", "import-multi-json", "add-multi-part", "cut-pages", "marker-pages", "marker-position", "compress-level", "choose-marker", "replace-file", "reset-btn"].forEach((id) => {
     const control = $(id);
     if (control) control.disabled = busy;
   });
   $("preview-btn").classList.toggle("loading", busy && Boolean(message));
   if (message) $("preview-btn").textContent = message;
-  else $("preview-btn").innerHTML = 'Preview result <span aria-hidden="true">→</span>';
+  else $("preview-btn").innerHTML = state.mode === "multi-cut"
+    ? 'Preview pieces <span aria-hidden="true">→</span>'
+    : 'Preview result <span aria-hidden="true">→</span>';
   $("create-btn").classList.toggle("loading", busy);
+  $("create-btn").innerHTML = state.mode === "multi-cut"
+    ? 'Generate all pieces <span aria-hidden="true">↓</span>'
+    : 'Create &amp; download PDF <span aria-hidden="true">↓</span>';
+  document.querySelectorAll("#tool-multi-cut input, #tool-multi-cut textarea, #tool-multi-cut button")
+    .forEach((control) => { control.disabled = busy; });
 }
 
 function openDatabase() {
@@ -166,24 +177,78 @@ function baseName(fileName) {
   return (fileName || "document").replace(/\.pdf$/i, "").replace(/[\\/:*?"<>|]+/g, "-");
 }
 
-function downloadPdf(bytes, fileName) {
+function downloadBlob(bytes, fileName, mimeType) {
   if (!bytes) return;
-  const blob = new Blob([bytes], { type: "application/pdf" });
+  const blob = new Blob([bytes], { type: mimeType || "application/octet-stream" });
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
   anchor.href = url;
-  anchor.download = fileName || "pdf-cutter-output.pdf";
+  anchor.download = fileName || "download";
   document.body.appendChild(anchor);
   anchor.click();
   anchor.remove();
   window.setTimeout(() => URL.revokeObjectURL(url), 30000);
 }
 
+function downloadPdf(bytes, fileName) {
+  downloadBlob(bytes, fileName || "pdf-cutter-output.pdf", "application/pdf");
+}
+
+function downloadMultiZip(results, sourceName) {
+  const files = {};
+  (results || []).forEach((result) => {
+    if (!result || !result.outputName || !result.bytes) return;
+    files[result.outputName] = result.bytes instanceof Uint8Array
+      ? result.bytes : new Uint8Array(result.bytes);
+  });
+  if (!Object.keys(files).length) {
+    showToast("There are no generated pieces to package.", "error");
+    return;
+  }
+  try {
+    const archive = zipSync(files, { level: 0 });
+    const name = baseName(sourceName || state.fileName) + " - Split Parts.zip";
+    downloadBlob(archive, name, "application/zip");
+  } catch (error) {
+    console.error(error);
+    showToast("Could not create the ZIP archive. Try downloading the pieces individually.", "error");
+  }
+}
+
 function setResultReady(record) {
-  const ready = Boolean(record && record.outputBytes);
+  const ready = Boolean(record && record.outputBytes && state.mode !== "multi-cut");
   $("result-ready").hidden = !ready;
   $("download-again").disabled = !ready;
   if (ready) $("result-name").textContent = record.outputName || "pdf-cutter-output.pdf";
+}
+
+function setMultiResultReady(record) {
+  const results = record && Array.isArray(record.multiResults) ? record.multiResults : state.multiResults;
+  const ready = state.mode === "multi-cut" && Array.isArray(results) && results.length > 0;
+  const panel = $("multi-result-ready");
+  panel.hidden = !ready;
+  if (!ready) return;
+  $("multi-result-summary").textContent = results.length + " piece" + (results.length === 1 ? "" : "s") + " generated";
+  const list = $("multi-results-list");
+  list.replaceChildren();
+  results.forEach((result, index) => {
+    const row = document.createElement("div");
+    row.className = "multi-result-item";
+    const name = document.createElement("div");
+    name.className = "multi-result-name";
+    const title = document.createElement("strong");
+    title.textContent = result.outputName || ("Part " + (index + 1) + ".pdf");
+    const detail = document.createElement("span");
+    detail.textContent = (result.pageCount || result.pages?.length || "—") + " pages · " + formatBytes(result.bytes?.byteLength || result.bytes?.length || 0);
+    name.append(title, detail);
+    const button = document.createElement("button");
+    button.className = "secondary-button";
+    button.type = "button";
+    button.textContent = "Download PDF ↓";
+    button.addEventListener("click", () => downloadPdf(result.bytes, result.outputName));
+    row.append(name, button);
+    list.appendChild(row);
+  });
 }
 
 function invalidatePreview() {
@@ -198,14 +263,15 @@ function invalidatePreview() {
     state.previewObserver = null;
   }
   $("preview-content").hidden = true;
+  $("multi-preview-selector-wrap").hidden = true;
   $("preview-empty").hidden = false;
   $("preview-btn").disabled = !state.sourceDoc || state.busy;
   $("create-btn").disabled = true;
 }
 
 function setMode(mode) {
-  state.mode = ["cut", "marker", "compress"].includes(mode) ? mode : "cut";
-  for (const option of ["cut", "marker", "compress"]) {
+  state.mode = ["cut", "marker", "compress", "multi-cut"].includes(mode) ? mode : "cut";
+  for (const option of ["cut", "marker", "compress", "multi-cut"]) {
     const active = state.mode === option;
     $("mode-" + option).classList.toggle("active", active);
     $("mode-" + option).setAttribute("aria-selected", String(active));
@@ -213,9 +279,17 @@ function setMode(mode) {
   }
   $("preview-empty-description").textContent = state.mode === "compress"
     ? "Upload a PDF, choose a compression level, then preview the smaller result before downloading."
-    : "Upload a PDF, choose the pages, then select Preview result to review the new page order.";
+    : state.mode === "multi-cut"
+      ? "Create named PDF pieces, allow overlapping pages, and preview one piece at a time before generating all of them."
+      : "Upload a PDF, choose the pages, then select Preview result to review the new page order.";
+  if (state.mode === "multi-cut" && state.pageCount && !state.multiParts.length) {
+    state.multiParts = [{ part_name: "Part 1", pages_range: "1-" + state.pageCount }];
+  }
   invalidatePreview();
+  renderMultiParts();
   if (state.currentRecord) state.currentRecord.operation = state.mode;
+  setResultReady(state.currentRecord);
+  setMultiResultReady(state.currentRecord);
 }
 
 function parsePageSpec(raw, pageCount) {
