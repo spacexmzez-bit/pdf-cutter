@@ -223,7 +223,9 @@ function setResultReady(record) {
 }
 
 function setMultiResultReady(record) {
-  const results = record && Array.isArray(record.multiResults) ? record.multiResults : state.multiResults;
+  const results = record
+    ? (Array.isArray(record.multiResults) ? record.multiResults : [])
+    : state.multiResults;
   const ready = state.mode === "multi-cut" && Array.isArray(results) && results.length > 0;
   const panel = $("multi-result-ready");
   panel.hidden = !ready;
@@ -321,6 +323,174 @@ function parsePageSpec(raw, pageCount) {
 
   if (!pages.length) throw new Error("No valid pages were selected.");
   return pages;
+}
+
+function renderMultiParts() {
+  const list = $("multi-parts-list");
+  if (!list) return;
+  list.replaceChildren();
+  if (!state.multiParts.length) {
+    const empty = document.createElement("div");
+    empty.className = "multi-parts-empty";
+    empty.textContent = "No pieces yet. Select Add piece or import a JSON definition.";
+    list.appendChild(empty);
+    return;
+  }
+  state.multiParts.forEach((part, index) => {
+    const row = document.createElement("div");
+    row.className = "multi-part-row";
+    row.dataset.index = String(index);
+    const nameField = document.createElement("div");
+    nameField.className = "multi-part-field";
+    const nameLabel = document.createElement("label");
+    nameLabel.textContent = "Part " + (index + 1) + " name";
+    const nameInput = document.createElement("input");
+    nameInput.className = "text-input";
+    nameInput.type = "text";
+    nameInput.maxLength = 80;
+    nameInput.value = part.part_name || "";
+    nameInput.placeholder = "e.g. Introduction";
+    nameInput.dataset.field = "part_name";
+    nameInput.setAttribute("aria-label", "Part " + (index + 1) + " name");
+    nameField.append(nameLabel, nameInput);
+    const rangeField = document.createElement("div");
+    rangeField.className = "multi-part-field";
+    const rangeLabel = document.createElement("label");
+    rangeLabel.textContent = "Pages to include";
+    const rangeInput = document.createElement("input");
+    rangeInput.className = "text-input";
+    rangeInput.type = "text";
+    rangeInput.value = part.pages_range || "";
+    rangeInput.placeholder = "1-4, 76, 88-100";
+    rangeInput.dataset.field = "pages_range";
+    rangeInput.setAttribute("aria-label", "Part " + (index + 1) + " page ranges");
+    rangeField.append(rangeLabel, rangeInput);
+    const remove = document.createElement("button");
+    remove.className = "multi-part-remove";
+    remove.type = "button";
+    remove.textContent = "×";
+    remove.title = "Remove this piece";
+    remove.setAttribute("aria-label", "Remove part " + (index + 1));
+    remove.dataset.action = "remove-part";
+    row.append(nameField, rangeField, remove);
+    list.appendChild(row);
+  });
+}
+
+function clearMultiResults() {
+  state.multiResults = [];
+  if (state.currentRecord) state.currentRecord.multiResults = null;
+  setMultiResultReady(null);
+}
+
+function addMultiPart() {
+  let number = state.multiParts.length + 1;
+  const existing = new Set(state.multiParts.map((part) => String(part.part_name || "").toLowerCase()));
+  while (existing.has(("Part " + number).toLowerCase())) number += 1;
+  state.multiParts.push({ part_name: "Part " + number, pages_range: "" });
+  clearMultiResults();
+  renderMultiParts();
+  invalidatePreview();
+}
+
+function handleMultiPartsInput(event) {
+  const input = event.target.closest("input[data-field]");
+  if (!input) return;
+  const row = input.closest(".multi-part-row");
+  const index = Number(row?.dataset.index);
+  if (!Number.isInteger(index) || !state.multiParts[index]) return;
+  state.multiParts[index][input.dataset.field] = input.value;
+  clearMultiResults();
+  invalidatePreview();
+}
+
+async function handleMultiPartsChange(event) {
+  const input = event.target.closest("input[data-field]");
+  if (!input) return;
+  try { await saveCurrentProject(); }
+  catch (error) { console.warn("Could not save multiple-cut settings:", error); }
+}
+
+async function handleMultiPartsClick(event) {
+  const button = event.target.closest('button[data-action="remove-part"]');
+  if (!button) return;
+  const row = button.closest(".multi-part-row");
+  const index = Number(row?.dataset.index);
+  if (!Number.isInteger(index) || !state.multiParts[index]) return;
+  state.multiParts.splice(index, 1);
+  clearMultiResults();
+  renderMultiParts();
+  invalidatePreview();
+  await saveCurrentProject();
+}
+
+async function importMultiJsonText() {
+  try {
+    const parts = parseMultiCutsJson($("multi-json-text").value, state.pageCount || null);
+    state.multiParts = parts.map((part) => ({
+      part_name: part.part_name,
+      pages_range: part.pages_range
+    }));
+    clearMultiResults();
+    renderMultiParts();
+    invalidatePreview();
+    await saveCurrentProject();
+    showToast(parts.length + " piece definition" + (parts.length === 1 ? "" : "s") + " imported.", "success");
+  } catch (error) {
+    showToast(error.message || "Could not import the JSON definitions.", "error");
+  }
+}
+
+async function importMultiJsonFile(file) {
+  if (!file) return;
+  if (!/\.json$/i.test(file.name) && file.type !== "application/json" && file.type !== "text/json") {
+    showToast("Choose a JSON file.", "error");
+    return;
+  }
+  try {
+    const text = await file.text();
+    $("multi-json-text").value = text;
+    await importMultiJsonText();
+  } catch (error) {
+    showToast(error.message || "Could not read this JSON file.", "error");
+  }
+}
+
+async function copyMultiJsonFormat() {
+  const format = '[\n  {\n    "part_name": "",\n    "pages_range": ""\n  }\n]';
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(format);
+    } else {
+      const helper = document.createElement("textarea");
+      helper.value = format;
+      helper.style.position = "fixed";
+      helper.style.opacity = "0";
+      document.body.appendChild(helper);
+      helper.select();
+      const copied = document.execCommand("copy");
+      helper.remove();
+      if (!copied) throw new Error("Clipboard access is unavailable.");
+    }
+    showToast("JSON format copied. Add your piece names and page ranges.", "success");
+  } catch (_) {
+    showToast("Could not copy automatically. You can copy the JSON example from the text area.", "error");
+  }
+}
+
+function renderMultiPreviewSelection(index) {
+  if (!state.preview || state.preview.mode !== "multi-cut") return;
+  const selected = Math.max(0, Math.min(Number(index) || 0, state.preview.parts.length - 1));
+  state.preview.selectedPartIndex = selected;
+  const part = state.preview.parts[selected];
+  const select = $("multi-preview-select");
+  select.value = String(selected);
+  $("multi-preview-selector-wrap").hidden = false;
+  $("preview-summary").textContent = part.part_name;
+  $("preview-subsummary").textContent = part.pages.length + " pages selected from " +
+    state.pageCount + " original pages · Overlap with other pieces is allowed";
+  $("preview-status").textContent = "PART " + (selected + 1) + " OF " + state.preview.parts.length;
+  renderPreviewGrid(part.entries);
 }
 
 function createPreviewEntries(pages, mode, position) {
@@ -471,8 +641,21 @@ async function saveCurrentProject() {
   record.operation = state.mode;
   record.updatedAt = Date.now();
   record.markerFileName = state.markerFileName || "";
-  record.pageSpec = state.mode === "cut" ? $("cut-pages").value : state.mode === "marker" ? $("marker-pages").value : "";
+  record.pageSpec = state.mode === "cut" ? $("cut-pages").value
+    : state.mode === "marker" ? $("marker-pages").value : "";
   record.compressionLevel = $("compress-level").value;
+  record.multiParts = state.mode === "multi-cut"
+    ? state.multiParts.map((part) => ({ part_name: part.part_name, pages_range: part.pages_range }))
+    : null;
+  record.multiResults = state.mode === "multi-cut" && state.multiResults.length
+    ? state.multiResults.map((result) => ({
+      part_name: result.part_name,
+      outputName: result.outputName,
+      pageCount: result.pageCount,
+      pages: result.pages.slice(),
+      bytes: result.bytes.slice()
+    }))
+    : null;
   record.markerPosition = $("marker-position").value;
   try {
     await putRecord(record);
@@ -576,18 +759,54 @@ async function makePreview() {
     showToast("Choose a source PDF first.", "error");
     return;
   }
-
   if (state.mode === "compress") {
     await makeCompressionPreview();
     return;
   }
   try {
-    setBusy(true, "Preparing preview…");
+    setBusy(true, state.mode === "multi-cut" ? "Checking pieces…" : "Preparing preview…");
+    if (state.mode === "multi-cut") {
+      const validated = validateMultiParts(state.multiParts, state.pageCount);
+      const names = new Set();
+      const parts = validated.map((part) => {
+        const outputName = createMultiOutputName(state.fileName, part.part_name);
+        const key = outputName.toLocaleLowerCase();
+        if (names.has(key)) throw new Error("Two pieces would create the same file name. Rename one of them.");
+        names.add(key);
+        return {
+          part_name: part.part_name,
+          pages_range: part.pages_range,
+          pages: part.pages,
+          outputName,
+          entries: part.pages.map((pageNumber) => ({
+            type: "source",
+            pageNumber,
+            label: part.part_name + " · Original page " + pageNumber
+          }))
+        };
+      });
+      state.preview = { mode: "multi-cut", parts, selectedPartIndex: 0 };
+      const select = $("multi-preview-select");
+      select.replaceChildren();
+      parts.forEach((part, index) => {
+        const option = document.createElement("option");
+        option.value = String(index);
+        option.textContent = "Part " + (index + 1) + " — " + part.part_name + " (" + part.pages.length + " pages)";
+        select.appendChild(option);
+      });
+      $("preview-empty").hidden = true;
+      $("preview-content").hidden = false;
+      renderMultiPreviewSelection(0);
+      $("create-btn").disabled = false;
+      await saveCurrentProject();
+      showToast(parts.length + " pieces validated. Preview each piece using the dropdown.", "success");
+      return;
+    }
+
     const raw = state.mode === "cut" ? $("cut-pages").value : $("marker-pages").value;
     const pages = parsePageSpec(raw, state.pageCount);
     const position = $("marker-position").value;
     const entries = createPreviewEntries(pages, state.mode, position);
-
     state.preview = {
       mode: state.mode,
       pages,
@@ -596,7 +815,6 @@ async function makePreview() {
       pageSpec: raw,
       hasCustomMarker: Boolean(state.markerBytes)
     };
-
     $("preview-empty").hidden = true;
     $("preview-content").hidden = false;
     $("preview-summary").textContent = entries.length + " output " + (entries.length === 1 ? "page" : "pages");
@@ -611,6 +829,7 @@ async function makePreview() {
   } catch (error) {
     state.preview = null;
     $("create-btn").disabled = true;
+    $("multi-preview-selector-wrap").hidden = true;
     showToast(error.message || "Could not create the preview.", "error");
   } finally {
     setBusy(false);
@@ -783,7 +1002,9 @@ async function handleSourceFile(file) {
     state.markerBytes = null;
     state.markerDoc = null;
     state.markerFileName = "";
-    state.multiParts = [{ part_name: "Part 1", pages_range: "1-" + documentToLoad.numPages }];
+    if (!state.multiParts.length) {
+      state.multiParts = [{ part_name: "Part 1", pages_range: "1-" + documentToLoad.numPages }];
+    }
     state.multiResults = [];
     renderMultiParts();
     setMultiResultReady(null);
