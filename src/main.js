@@ -627,6 +627,32 @@ async function createMarkerPage(output, markerDocument, sourceDocument, sourceIn
   }
 }
 
+async function createMultipleCutOutputs(preview) {
+  const sourceDocument = await PDFDocument.load(state.sourceBytes.slice());
+  const results = [];
+  for (let index = 0; index < preview.parts.length; index += 1) {
+    const part = preview.parts[index];
+    $("create-btn").textContent = "Creating part " + (index + 1) + " of " + preview.parts.length + "…";
+    const output = await PDFDocument.create();
+    const indexes = part.pages.map((pageNumber) => pageNumber - 1);
+    const copiedPages = await output.copyPages(sourceDocument, indexes);
+    copiedPages.forEach((page) => output.addPage(page));
+    const bytes = new Uint8Array(await output.save());
+    const check = await PDFDocument.load(bytes);
+    if (check.getPageCount() !== part.pages.length) {
+      throw new Error('Output validation failed for "' + part.part_name + '". No pieces were downloaded.');
+    }
+    results.push({
+      part_name: part.part_name,
+      outputName: part.outputName,
+      pageCount: check.getPageCount(),
+      pages: part.pages.slice(),
+      bytes
+    });
+  }
+  return results;
+}
+
 async function createOutput() {
   if (!state.preview || !state.sourceBytes) {
     showToast("Create a fresh preview before generating the PDF.", "error");
@@ -635,8 +661,33 @@ async function createOutput() {
 
   const preview = state.preview;
   try {
-    setBusy(true, "Creating PDF…");
-    $("create-btn").textContent = "Creating PDF…";
+    setBusy(true, preview.mode === "multi-cut" ? "Creating pieces…" : "Creating PDF…");
+    if (preview.mode === "multi-cut") {
+      const results = await createMultipleCutOutputs(preview);
+      state.multiResults = results;
+      if (!state.currentRecord) {
+        state.currentRecord = {
+          id: (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + "-" + Math.random().toString(16).slice(2)),
+          createdAt: Date.now()
+        };
+      }
+      state.currentRecord.outputBytes = null;
+      state.currentRecord.outputName = null;
+      state.currentRecord.operation = "multi-cut";
+      state.currentRecord.multiParts = preview.parts.map((part) => ({
+        part_name: part.part_name,
+        pages_range: part.pages_range
+      }));
+      state.currentRecord.multiResults = results;
+      state.currentRecord.outputPageCount = results.reduce((total, result) => total + result.pageCount, 0);
+      state.currentRecord.updatedAt = Date.now();
+      setResultReady(null);
+      setMultiResultReady(state.currentRecord);
+      await saveCurrentProject();
+      showToast(results.length + " PDF pieces generated. Download them individually or as one ZIP.", "success");
+      return;
+    }
+
     let outputName = "";
     let resultBytes;
     let outputPageCount;
@@ -645,36 +696,34 @@ async function createOutput() {
       outputName = baseName(state.fileName) + "-compressed.pdf";
       outputPageCount = state.pageCount;
     } else {
-    const sourceDocument = await PDFDocument.load(state.sourceBytes.slice());
-    const output = await PDFDocument.create();
-
-    if (preview.mode === "cut") {
-      const indexes = preview.pages.map((page) => page - 1);
-      const copiedPages = await output.copyPages(sourceDocument, indexes);
-      copiedPages.forEach((page) => output.addPage(page));
-      outputName = baseName(state.fileName) + "-cut.pdf";
-    } else {
-      const markerDocument = state.markerBytes ? await PDFDocument.load(state.markerBytes.slice()) : null;
-      const originalPages = await output.copyPages(sourceDocument, sourceDocument.getPageIndices());
-      const selected = new Set(preview.pages);
-
-      for (let index = 0; index < originalPages.length; index += 1) {
-        const pageNumber = index + 1;
-        if (selected.has(pageNumber) && preview.position === "before") {
-          await createMarkerPage(output, markerDocument, sourceDocument, index);
+      const sourceDocument = await PDFDocument.load(state.sourceBytes.slice());
+      const output = await PDFDocument.create();
+      if (preview.mode === "cut") {
+        const indexes = preview.pages.map((page) => page - 1);
+        const copiedPages = await output.copyPages(sourceDocument, indexes);
+        copiedPages.forEach((page) => output.addPage(page));
+        outputName = baseName(state.fileName) + "-cut.pdf";
+      } else {
+        const markerDocument = state.markerBytes ? await PDFDocument.load(state.markerBytes.slice()) : null;
+        const originalPages = await output.copyPages(sourceDocument, sourceDocument.getPageIndices());
+        const selected = new Set(preview.pages);
+        for (let index = 0; index < originalPages.length; index += 1) {
+          const pageNumber = index + 1;
+          if (selected.has(pageNumber) && preview.position === "before") {
+            await createMarkerPage(output, markerDocument, sourceDocument, index);
+          }
+          output.addPage(originalPages[index]);
+          if (selected.has(pageNumber) && preview.position === "after") {
+            await createMarkerPage(output, markerDocument, sourceDocument, index);
+          }
         }
-        output.addPage(originalPages[index]);
-        if (selected.has(pageNumber) && preview.position === "after") {
-          await createMarkerPage(output, markerDocument, sourceDocument, index);
-        }
+        outputName = baseName(state.fileName) + "-with-markers.pdf";
       }
-      outputName = baseName(state.fileName) + "-with-markers.pdf";
+      const savedBytes = await output.save();
+      resultBytes = new Uint8Array(savedBytes);
+      outputPageCount = output.getPageCount();
     }
-
-    const savedBytes = await output.save();
-    resultBytes = new Uint8Array(savedBytes);
-    outputPageCount = output.getPageCount();
-    }
+    state.multiResults = [];
     if (!state.currentRecord) {
       state.currentRecord = {
         id: (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + "-" + Math.random().toString(16).slice(2)),
@@ -684,13 +733,14 @@ async function createOutput() {
     state.currentRecord.outputBytes = resultBytes;
     state.currentRecord.outputName = outputName;
     state.currentRecord.operation = preview.mode;
+    state.currentRecord.multiResults = null;
     state.currentRecord.pageSpec = preview.pageSpec;
     state.currentRecord.markerPosition = preview.position;
     state.currentRecord.outputPageCount = outputPageCount;
     state.currentRecord.compressionLevel = preview.quality || null;
     state.currentRecord.updatedAt = Date.now();
-
     setResultReady(state.currentRecord);
+    setMultiResultReady(null);
     await saveCurrentProject();
     downloadPdf(resultBytes, outputName);
     showToast("Your PDF was created and downloaded.", "success");
@@ -699,8 +749,6 @@ async function createOutput() {
     showToast(error.message || "Could not create this PDF. It may be encrypted or damaged.", "error");
   } finally {
     setBusy(false);
-    $("create-btn").innerHTML = 'Create &amp; download PDF <span aria-hidden="true">↓</span>';
-    $("create-btn").disabled = !state.preview;
   }
 }
 
@@ -735,6 +783,10 @@ async function handleSourceFile(file) {
     state.markerBytes = null;
     state.markerDoc = null;
     state.markerFileName = "";
+    state.multiParts = [{ part_name: "Part 1", pages_range: "1-" + documentToLoad.numPages }];
+    state.multiResults = [];
+    renderMultiParts();
+    setMultiResultReady(null);
     $("marker-file-input").value = "";
     state.currentRecord = {
       id: (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + "-" + Math.random().toString(16).slice(2)),
@@ -832,7 +884,9 @@ async function loadHistory() {
       const title = document.createElement("strong");
       title.textContent = record.fileName || "Untitled PDF";
       const detail = document.createElement("span");
-      const operation = record.operation === "marker" ? "PDF marker" : record.operation === "compress" ? "PDF compressor" : "PDF cutter";
+      const operation = record.operation === "marker" ? "PDF marker"
+        : record.operation === "compress" ? "PDF compressor"
+          : record.operation === "multi-cut" ? "PDF multiple cuts" : "PDF cutter";
       detail.textContent = operation + " · " + (record.pageCount || "—") + " original pages · " + formatDate(record.updatedAt || record.createdAt);
       copy.append(title, detail);
 
@@ -845,14 +899,17 @@ async function loadHistory() {
       openButton.addEventListener("click", () => openSavedProject(record.id));
       actions.appendChild(openButton);
 
-      if (record.outputBytes) {
+      if (record.outputBytes || (Array.isArray(record.multiResults) && record.multiResults.length)) {
         const downloadButton = document.createElement("button");
         downloadButton.className = "history-download";
         downloadButton.type = "button";
-        downloadButton.textContent = "↓";
-        downloadButton.title = "Download saved result";
-        downloadButton.setAttribute("aria-label", "Download saved result");
-        downloadButton.addEventListener("click", () => downloadPdf(record.outputBytes, record.outputName || "pdf-cutter-output.pdf"));
+        const hasParts = Array.isArray(record.multiResults) && record.multiResults.length > 0;
+        downloadButton.textContent = hasParts ? "ZIP" : "↓";
+        downloadButton.title = hasParts ? "Download all saved pieces as ZIP" : "Download saved result";
+        downloadButton.setAttribute("aria-label", downloadButton.title);
+        downloadButton.addEventListener("click", () => hasParts
+          ? downloadMultiZip(record.multiResults, record.fileName)
+          : downloadPdf(record.outputBytes, record.outputName || "pdf-cutter-output.pdf"));
         actions.appendChild(downloadButton);
       }
 
@@ -904,6 +961,13 @@ async function openSavedProject(id) {
     state.markerBytes = record.markerBytes ? new Uint8Array(record.markerBytes) : null;
     state.markerDoc = state.markerBytes ? await loadPdfDocument(state.markerBytes) : null;
     state.markerFileName = record.markerFileName || "";
+    state.multiParts = Array.isArray(record.multiParts)
+      ? record.multiParts.map((part) => ({ part_name: part.part_name, pages_range: part.pages_range }))
+      : [{ part_name: "Part 1", pages_range: "1-" + state.pageCount }];
+    state.multiResults = Array.isArray(record.multiResults)
+      ? record.multiResults.map((result) => ({ ...result, bytes: new Uint8Array(result.bytes) }))
+      : [];
+    renderMultiParts();
 
     setMode(record.operation || "cut");
     $("cut-pages").value = record.operation === "cut" ? (record.pageSpec || "1-" + state.pageCount) : "1-" + state.pageCount;
@@ -920,6 +984,7 @@ async function openSavedProject(id) {
     $("preview-btn").disabled = false;
     invalidatePreview();
     setResultReady(record);
+    setMultiResultReady(record);
     showToast("Saved project opened from this browser.", "success");
   } catch (error) {
     showToast(error.message || "Could not open the saved project.", "error");
@@ -941,6 +1006,8 @@ function resetWorkspace() {
   state.markerFileName = "";
   state.currentRecord = null;
   state.preview = null;
+  state.multiParts = [{ part_name: "Part 1", pages_range: "" }];
+  state.multiResults = [];
   if (state.compressedPreviewDoc) state.compressedPreviewDoc.destroy().catch(() => {});
   state.compressedPreviewDoc = null;
 
@@ -950,6 +1017,10 @@ function resetWorkspace() {
   $("cut-pages").value = "1-3";
   $("marker-pages").value = "1";
   $("compress-level").value = "balanced";
+  $("multi-json-text").value = "";
+  renderMultiParts();
+  $("multi-preview-selector-wrap").hidden = true;
+  setMultiResultReady(null);
   $("marker-file-label").textContent = "A blank page is used by default";
   $("marker-file-label").classList.remove("has-file");
   $("preview-grid").replaceChildren();
@@ -973,6 +1044,24 @@ function initEvents() {
   $("mode-cut").addEventListener("click", () => setMode("cut"));
   $("mode-marker").addEventListener("click", () => setMode("marker"));
   $("mode-compress").addEventListener("click", () => setMode("compress"));
+  $("mode-multi-cut").addEventListener("click", () => setMode("multi-cut"));
+  $("copy-multi-json").addEventListener("click", copyMultiJsonFormat);
+  $("choose-multi-json").addEventListener("click", () => $("multi-json-file").click());
+  $("multi-json-file").addEventListener("change", (event) => {
+    const file = event.target.files && event.target.files[0];
+    if (file) importMultiJsonFile(file);
+    event.target.value = "";
+  });
+  $("import-multi-json").addEventListener("click", importMultiJsonText);
+  $("add-multi-part").addEventListener("click", async () => {
+    addMultiPart();
+    await saveCurrentProject();
+  });
+  $("multi-parts-list").addEventListener("input", handleMultiPartsInput);
+  $("multi-parts-list").addEventListener("change", handleMultiPartsChange);
+  $("multi-parts-list").addEventListener("click", handleMultiPartsClick);
+  $("multi-preview-select").addEventListener("change", (event) => renderMultiPreviewSelection(event.target.value));
+  $("download-multi-zip").addEventListener("click", () => downloadMultiZip(state.multiResults, state.fileName));
 
   $("dropzone").addEventListener("click", (event) => {
     if (event.target.id !== "source-file") showFilePicker();
@@ -1057,8 +1146,11 @@ function initEvents() {
         state.currentRecord.outputBytes = null;
         state.currentRecord.sourceBytes = null;
         state.currentRecord.markerBytes = null;
+        state.currentRecord.multiResults = null;
       }
+      state.multiResults = [];
       setResultReady(null);
+      setMultiResultReady(null);
       showToast("Local history cleared from this browser.", "success");
     } catch (error) {
       showToast(error.message || "Could not clear local history.", "error");
