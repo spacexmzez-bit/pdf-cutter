@@ -272,7 +272,16 @@ function invalidatePreview() {
 }
 
 function setMode(mode) {
+  const previousMode = state.mode;
   state.mode = ["cut", "marker", "compress", "multi-cut"].includes(mode) ? mode : "cut";
+  if (previousMode === "multi-cut" && state.mode !== "multi-cut") {
+    state.multiResults = [];
+    if (state.currentRecord) state.currentRecord.multiResults = null;
+  }
+  if (state.mode === "multi-cut" && previousMode !== "multi-cut" && state.currentRecord) {
+    state.currentRecord.outputBytes = null;
+    state.currentRecord.outputName = null;
+  }
   for (const option of ["cut", "marker", "compress", "multi-cut"]) {
     const active = state.mode === option;
     $("mode-" + option).classList.toggle("active", active);
@@ -656,6 +665,10 @@ async function saveCurrentProject() {
       bytes: result.bytes.slice()
     }))
     : null;
+  if (state.mode === "multi-cut") {
+    record.outputBytes = null;
+    record.outputName = null;
+  }
   record.markerPosition = $("marker-position").value;
   try {
     await putRecord(record);

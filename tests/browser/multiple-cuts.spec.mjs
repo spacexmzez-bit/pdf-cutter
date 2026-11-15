@@ -68,6 +68,12 @@ test("multiple cuts supports overlaps, one-piece preview, individual downloads, 
   expect((await PDFDocument.load(files["source - Cover and intro.pdf"])).getPageCount()).toBe(3);
   expect((await PDFDocument.load(files["source - Chapter 1.pdf"])).getPageCount()).toBe(3);
   expect((await PDFDocument.load(files["source - Chapter 2.pdf"])).getPageCount()).toBe(3);
+
+  await page.reload();
+  await expect(page.locator("#history-list .history-item")).toHaveCount(1);
+  await page.locator("#history-list .history-open").click();
+  await expect(page.locator("#multi-result-ready")).toBeVisible();
+  await expect(page.locator("#multi-results-list .multi-result-item")).toHaveCount(3);
 });
 
 test("JSON file import and Copy JSON format are available", async ({ page, context }) => {
