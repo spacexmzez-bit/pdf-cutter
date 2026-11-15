@@ -6,6 +6,8 @@ A browser-based PDF utility for extracting selected pages and inserting marker p
 
 - **PDF compressor:** lossless structural optimization or balanced/maximum embedded-image compression, with before/after size, a page preview, and a no-growth safeguard. Uses the qpdf WebAssembly engine locally, without rasterizing whole pages.
 - **PDF cutter:** keep individual pages, ranges, or multiple ranges such as 1-37, 88-119.
+- **Multiple Cuts:** split one PDF into up to 50 named PDF pieces, each with its own page ranges. Pieces may overlap, so shared cover pages can appear in multiple outputs. Preview one piece at a time, download pieces individually, or package all of them into a ZIP.
+- **JSON piece import:** import a JSON file or pasted JSON array using exactly two fields per piece: `part_name` and `pages_range`. The Copy JSON format button copies a blank reusable structure.
 - **Preview before creating:** inspect the selected page sequence before downloading the result.
 - **PDF marker:** insert a marker before or after each selected original page while keeping all original pages.
 - **Custom marker page:** optionally upload a PDF and use its first page as the inserted marker. Without a custom file, a blank page matching the nearby page size is inserted.
@@ -45,15 +47,15 @@ The production build generates a versioned service worker that caches the static
 
 - PDF parsing, page rendering, page copying, and PDF generation run in the user's browser.
 - The application does not send PDF contents to an application server or third-party PDF processing service.
-- The production JavaScript bundles PDF.js and pdf-lib locally. Internet access is needed for the initial hosted load. After the app assets have been cached, the installed app can also work offline. Documents are never sent to a processing service.
-- When **Remember recent projects** is enabled, the browser stores the original PDF, optional marker template, generated output, and project settings in IndexedDB. This storage belongs to the current browser profile and may be cleared by browser settings, private browsing, or storage cleanup.
+- The production JavaScript bundles PDF.js, pdf-lib, and fflate locally. Internet access is needed for the initial hosted load. After the app assets have been cached, the installed app can also work offline. Documents are never sent to a processing service.
+- When **Remember recent projects** is enabled, the browser stores the original PDF, optional marker template, generated output(s), and project settings in IndexedDB. This storage belongs to the current browser profile and may be cleared by browser settings, private browsing, or storage cleanup.
 - Turn off the history toggle to stop saving new projects. Use **Clear local history** to delete saved projects and PDFs from this browser.
 - Anyone who can use the same unlocked browser profile may be able to access its saved local history. Do not enable local history on a shared or untrusted device.
 
 ## Important limitations
 
 - A custom marker PDF contributes its first page only.
-- Very large PDFs may require substantial browser memory. The preview renders the first 60 output pages; the generated PDF still contains the full selected sequence.
+- Very large PDFs may require substantial browser memory. The preview renders the first 60 pages of the currently selected output piece; generated PDFs still contain every selected page. Multiple Cuts supports up to 50 pieces per operation.
 - Editing a digitally signed PDF may invalidate its signature. Review generated documents before relying on them.
 - Complex PDF features such as interactive forms, document-level bookmarks, and some annotations may not be preserved by page copying. Keep an untouched original when those features matter.
 
