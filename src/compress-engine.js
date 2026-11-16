@@ -24,7 +24,6 @@ function supportedColorSpace(info) {
   const color = info.colorSpaceInfo;
   if (!color) return false;
   if (color.family === "DeviceRGB" || color.family === "DeviceGray") return true;
-  if (color.family === "ICCBased") return color.components === 1 || color.components === 3;
   if (color.family === "Indexed") {
     return color.base?.family === "DeviceRGB" || color.base?.family === "DeviceGray";
   }
@@ -156,7 +155,7 @@ export async function compressPdfBytes(source, level, onProgress = () => {}, was
     } else if (!imagesReencoded) {
       const reason = !imageCount
         ? "No image objects were found to recompress; this PDF may be mostly text or vector artwork."
-        : "None of the " + imageCount + " image object(s) matched the safe recompression rules. Common reasons include CCITT fax, JBIG2, JPEG2000, CMYK, masks, or unsupported image encodings.";
+        : "None of the " + imageCount + " image object(s) matched the safe recompression rules. Common reasons include CCITT fax, JBIG2, JPEG2000, ICCBased/CMYK color, masks, or unsupported image encodings.";
       note = reason + (improved
         ? " Only a structural rewrite reduced the file size. Try Extreme rasterization if editability is not required."
         : " The original PDF is kept unchanged. Try Extreme rasterization if editability is not required.");
