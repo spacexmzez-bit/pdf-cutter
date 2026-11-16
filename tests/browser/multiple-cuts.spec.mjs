@@ -161,9 +161,9 @@ test("single PDF output can be passed directly into another tool", async ({ page
 
   await page.locator("#next-job-yes").click();
   await page.locator("#next-job-tool").selectOption("compress");
-  await page.locator("#compress-level").selectOption("lossless");
   await page.locator("#next-job-start").click();
   await expect(page.locator("#file-name")).toHaveText("chain-source-cut.pdf");
+  await page.locator("#compress-level").selectOption("lossless");
   await expect(page.locator("#preview-btn")).toBeEnabled();
   await page.locator("#preview-btn").click();
   await expect(page.locator("#preview-status")).toHaveText("COMPRESSION READY", { timeout: 120_000 });
