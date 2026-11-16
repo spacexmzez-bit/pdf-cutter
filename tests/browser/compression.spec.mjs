@@ -85,3 +85,25 @@ test("lossless compression preserves pages and can download unchanged originals"
   expect(bytes.length).toBeLessThanOrEqual(source.length);
   expect((await PDFDocument.load(bytes)).getPageCount()).toBe(2);
 });
+
+
+test("Extreme rasterization compresses image-heavy PDFs and clearly warns about flattening", async ({ page }) => {
+  const source = await imageHeavyPdf();
+  await page.goto("/");
+  await page.locator("#mode-compress").click();
+  await page.locator("#source-file").setInputFiles({
+    name: "rasterize-sample.pdf", mimeType: "application/pdf", buffer: source
+  });
+  await page.locator("#compress-level").selectOption("rasterize");
+  await expect(page.locator(".compression-raster-warning")).toContainText("Text will no longer be selectable");
+  await page.locator("#preview-btn").click();
+  await expect(page.locator("#preview-status")).toHaveText("COMPRESSION READY", { timeout: 120_000 });
+  await expect(page.locator("#compress-stats")).toContainText("flattened to JPEG");
+  const [download] = await Promise.all([
+    page.waitForEvent("download"),
+    page.locator("#create-btn").click()
+  ]);
+  const bytes = await readFile(await download.path());
+  expect(bytes.length).toBeLessThan(source.length);
+  expect((await PDFDocument.load(bytes)).getPageCount()).toBe(1);
+});

@@ -4,8 +4,8 @@ import { canDecode, toImageBitmap } from "@lipoe/browser-qpdf/codecs";
 export const COMPRESSION_LIMIT_BYTES = 256 * 1024 * 1024;
 export const COMPRESSION_PRESETS = Object.freeze({
   lossless: { label: "Lossless", maxDimension: null, jpegQuality: null },
-  balanced: { label: "Balanced", maxDimension: 1800, jpegQuality: 0.82 },
-  maximum: { label: "Maximum", maxDimension: 1200, jpegQuality: 0.62 }
+  balanced: { label: "Balanced", maxDimension: 1600, jpegQuality: 0.76 },
+  maximum: { label: "Maximum", maxDimension: 1100, jpegQuality: 0.52 }
 });
 
 function assertSuccess(result, context) {
@@ -20,19 +20,30 @@ function hasNondefaultDecode(info) {
   return info.decode.some((value, i) => value !== (i % 2));
 }
 
+function supportedColorSpace(info) {
+  const color = info.colorSpaceInfo;
+  if (!color) return false;
+  if (color.family === "DeviceRGB" || color.family === "DeviceGray") return true;
+  if (color.family === "ICCBased") return color.components === 1 || color.components === 3;
+  if (color.family === "Indexed") {
+    return color.base?.family === "DeviceRGB" || color.base?.family === "DeviceGray";
+  }
+  return false;
+}
+
 function safeImageCandidate(info) {
   const masks = info.masks;
-  // Never flatten alpha, stencil masks, ICC profiles, spot colors, CMYK,
-  // JPEG2000/JBIG2, or images with nonstandard decode transformations.
-  if (!masks || masks.isStencilMask || masks.softMask || masks.mask ||
-      masks.softMaskInData != null || masks.softMaskOf?.length || masks.maskOf?.length) return false;
-  if (!["DeviceRGB", "DeviceGray"].includes(info.colorSpaceInfo?.family)) return false;
-  if (info.bitsPerComponent !== 8 || hasNondefaultDecode(info)) return false;
+  // Preserve transparency dictionaries and their linked mask streams. We
+  // recompress only the colour image, never a mask or a colour-key image.
+  if (!masks || masks.isStencilMask || masks.mask || masks.softMaskInData != null ||
+      masks.softMaskOf?.length || masks.maskOf?.length) return false;
+  if (!supportedColorSpace(info)) return false;
+  if (![1, 2, 4, 8, 16].includes(info.bitsPerComponent)) return false;
   if (!["jpeg", "samples"].includes(info.encoding?.kind)) return false;
   if (!canDecode(info).ok) return false;
-  if (info.width < 320 || info.height < 320 || info.width * info.height < 250_000) return false;
-  if (info.width * info.height > 35_000_000) return false;
-  return Number.isFinite(info.streamLength) && info.streamLength >= 24_000;
+  if (info.width < 128 || info.height < 128 || info.width * info.height < 40_000) return false;
+  if (info.width * info.height > 40_000_000) return false;
+  return Number.isFinite(info.streamLength) && info.streamLength >= 8_000;
 }
 
 async function reencodeImage(doc, info, preset) {
@@ -59,8 +70,8 @@ async function reencodeImage(doc, info, preset) {
 
     const blob = await canvas.convertToBlob({ type: "image/jpeg", quality: preset.jpegQuality });
     if (blob.type !== "image/jpeg") return false;
-    // Only replace an individual image if the encoding itself is clearly smaller.
-    if (blob.size >= info.streamLength * 0.94) return false;
+    // Avoid quality loss when recompression would save only a negligible amount.
+    if (blob.size >= info.streamLength * 0.97) return false;
     const jpeg = new Uint8Array(await blob.arrayBuffer());
     const replaced = doc.replaceImageStream(info.objId, info.generation, jpeg, {
       width: canvas.width,
@@ -94,7 +105,7 @@ export async function compressPdfBytes(source, level, onProgress = () => {}, was
   const options = wasmUrl ? { locateFile: (name) => name.endsWith(".wasm") ? wasmUrl : name } : undefined;
   const qpdf = await createQpdfImageStreams(options);
   let doc;
-  let imagesChanged = 0;
+  let imagesReencoded = 0;
   let imagesSkipped = 0;
   let imageCount = 0;
   let note = "";
@@ -108,14 +119,14 @@ export async function compressPdfBytes(source, level, onProgress = () => {}, was
       if (typeof OffscreenCanvas !== "function" || typeof createImageBitmap !== "function") {
         note = "This browser does not support image recompression in a worker. Structural optimization was used instead.";
       } else {
-        onProgress({ stage: "Finding safe-to-compress images…", percent: 12 });
+        onProgress({ stage: "Finding compressible images…", percent: 12 });
         const images = assertSuccess(doc.getImages({ recursive: true }), "Could not inspect PDF images");
         imageCount = images.length;
         for (let i = 0; i < images.length; i += 1) {
           const info = images[i];
           if (safeImageCandidate(info)) {
             try {
-              if (await reencodeImage(doc, info, preset)) imagesChanged++;
+              if (await reencodeImage(doc, info, preset)) imagesReencoded++;
               else imagesSkipped++;
             } catch {
               // A malformed or unsupported image is left untouched, not removed.
@@ -133,22 +144,35 @@ export async function compressPdfBytes(source, level, onProgress = () => {}, was
         }
       }
     }
+
     onProgress({ stage: "Writing and checking the PDF…", percent: 91 });
     const output = assertSuccess(doc.writePdf(), "Could not write optimized PDF");
-    // Copy out of WASM memory before closing the document.
     const optimized = output.slice();
     const improved = optimized.length < source.length;
     const result = improved ? optimized : source.slice();
-    if (!improved) {
-      note = note || ("No smaller safe result was found; your original PDF is kept unchanged." +
-        (level === "lossless" ? "" : " " + imagesChanged + " image(s) re-encoded, " + imagesSkipped + " skipped."));
+
+    if (level === "lossless") {
+      if (!improved) note = "No meaningful structural savings were found. The original PDF is kept unchanged.";
+    } else if (!imagesReencoded) {
+      const reason = !imageCount
+        ? "No image objects were found to recompress; this PDF may be mostly text or vector artwork."
+        : "None of the " + imageCount + " image object(s) matched the safe recompression rules. Common reasons include CCITT fax, JBIG2, JPEG2000, CMYK, masks, or unsupported image encodings.";
+      note = reason + (improved
+        ? " Only a structural rewrite reduced the file size. Try Extreme rasterization if editability is not required."
+        : " The original PDF is kept unchanged. Try Extreme rasterization if editability is not required.");
+    } else if (!improved) {
+      note = imagesReencoded + " image(s) were recompressed, but the complete PDF did not become smaller. The original is kept unchanged.";
+    } else {
+      note = imagesReencoded + " of " + imageCount + " embedded image(s) recompressed; " + imagesSkipped + " left untouched. Text and vector content remain selectable.";
     }
+
     onProgress({ stage: "Compression complete", percent: 100 });
     return {
       bytes: result,
       originalSize: source.length,
       outputSize: result.length,
-      imagesChanged: improved ? imagesChanged : 0,
+      imagesChanged: improved ? imagesReencoded : 0,
+      imagesReencoded,
       imagesSkipped,
       imageCount,
       usedOriginal: !improved,

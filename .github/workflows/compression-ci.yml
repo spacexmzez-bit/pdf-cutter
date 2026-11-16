@@ -2,7 +2,7 @@ name: PDF compression checks
 
 on:
   push:
-    branches: [main, feature/local-pdf-compression, feature/multiple-cuts-2026-11-15]
+    branches: [main, feature/local-pdf-compression, feature/multiple-cuts-2026-11-15, feature/multitool-compression-2026-11-16]
   pull_request:
     branches: [main]
 

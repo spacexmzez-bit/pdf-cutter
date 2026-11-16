@@ -31,6 +31,12 @@ const state = {
   compressionCancel: null,
   multiParts: [],
   multiResults: [],
+  batchMode: false,
+  batchInputs: [],
+  batchPreviews: [],
+  batchErrors: [],
+  batchIndex: 0,
+  nextJobSources: [],
   remember: true,
   busy: false
 };
@@ -52,7 +58,7 @@ function setBusy(busy, message) {
   state.busy = busy;
   $("preview-btn").disabled = busy || !state.sourceDoc;
   $("create-btn").disabled = busy || !state.preview;
-  ["mode-cut", "mode-marker", "mode-compress", "mode-multi-cut", "source-file", "marker-file-input", "multi-json-file", "multi-json-text", "copy-multi-json", "choose-multi-json", "import-multi-json", "add-multi-part", "cut-pages", "marker-pages", "marker-position", "compress-level", "choose-marker", "replace-file", "reset-btn"].forEach((id) => {
+  ["mode-cut", "mode-marker", "mode-compress", "mode-multi-cut", "source-file", "marker-file-input", "multi-json-file", "multi-json-text", "copy-multi-json", "choose-multi-json", "import-multi-json", "add-multi-part", "cut-pages", "marker-pages", "marker-position", "compress-level", "choose-marker", "replace-file", "reset-btn", "next-job-tool", "next-job-start", "next-job-yes", "next-job-no"].forEach((id) => {
     const control = $(id);
     if (control) control.disabled = busy;
   });
@@ -194,7 +200,7 @@ function downloadPdf(bytes, fileName) {
   downloadBlob(bytes, fileName || "pdf-cutter-output.pdf", "application/pdf");
 }
 
-function downloadMultiZip(results, sourceName) {
+function downloadMultiZip(results, sourceName, archiveLabel) {
   const files = {};
   (results || []).forEach((result) => {
     if (!result || !result.outputName || !result.bytes) return;
@@ -207,7 +213,7 @@ function downloadMultiZip(results, sourceName) {
   }
   try {
     const archive = zipSync(files, { level: 0 });
-    const name = baseName(sourceName || state.fileName) + " - Split Parts.zip";
+    const name = baseName(sourceName || state.fileName) + " - " + (archiveLabel || "Split Parts") + ".zip";
     downloadBlob(archive, name, "application/zip");
   } catch (error) {
     console.error(error);
@@ -216,7 +222,7 @@ function downloadMultiZip(results, sourceName) {
 }
 
 function setResultReady(record) {
-  const ready = Boolean(record && record.outputBytes && state.mode !== "multi-cut");
+  const ready = Boolean(record && record.outputBytes && state.mode !== "multi-cut" && !state.batchMode && !record.batchMode);
   $("result-ready").hidden = !ready;
   $("download-again").disabled = !ready;
   if (ready) $("result-name").textContent = record.outputName || "pdf-cutter-output.pdf";
@@ -226,11 +232,22 @@ function setMultiResultReady(record) {
   const results = record
     ? (Array.isArray(record.multiResults) ? record.multiResults : [])
     : state.multiResults;
-  const ready = state.mode === "multi-cut" && Array.isArray(results) && results.length > 0;
+  const batch = Boolean(state.batchMode || record?.batchMode);
+  const ready = (state.mode === "multi-cut" || batch) && Array.isArray(results) && results.length > 0;
   const panel = $("multi-result-ready");
   panel.hidden = !ready;
   if (!ready) return;
-  $("multi-result-summary").textContent = results.length + " piece" + (results.length === 1 ? "" : "s") + " generated";
+  $("multi-result-summary").textContent = results.length + (batch ? " result" : " piece") + (results.length === 1 ? "" : "s") + " generated";
+  panel.querySelector(".multi-results-heading span").textContent = batch
+    ? "Each selected input was processed separately. Download individual results or collect them in one ZIP."
+    : "Download each PDF separately or collect all pieces in one ZIP.";
+  $("download-multi-zip").textContent = batch ? "Download all results as ZIP ↓" : "Download all as ZIP ↓";
+  const errors = record?.batchErrors || state.batchErrors || [];
+  const errorPanel = $("batch-result-errors");
+  errorPanel.hidden = !batch || !errors.length;
+  errorPanel.textContent = errors.length
+    ? errors.map((item) => item.fileName + ": " + item.message).join(" · ")
+    : "";
   const list = $("multi-results-list");
   list.replaceChildren();
   results.forEach((result, index) => {
@@ -255,6 +272,7 @@ function setMultiResultReady(record) {
 
 function invalidatePreview() {
   state.preview = null;
+  if (state.batchMode) state.batchPreviews = [];
   if (state.compressedPreviewDoc) {
     state.compressedPreviewDoc.destroy().catch(() => {});
     state.compressedPreviewDoc = null;
@@ -266,6 +284,7 @@ function invalidatePreview() {
   }
   $("preview-content").hidden = true;
   $("multi-preview-selector-wrap").hidden = true;
+  $("batch-preview-selector-wrap").hidden = true;
   $("preview-empty").hidden = false;
   $("preview-btn").disabled = !state.sourceDoc || state.busy;
   $("create-btn").disabled = true;
@@ -274,7 +293,7 @@ function invalidatePreview() {
 function setMode(mode) {
   const previousMode = state.mode;
   state.mode = ["cut", "marker", "compress", "multi-cut"].includes(mode) ? mode : "cut";
-  if (previousMode === "multi-cut" && state.mode !== "multi-cut") {
+  if (previousMode === "multi-cut" && state.mode !== "multi-cut" && !state.batchMode) {
     state.multiResults = [];
     if (state.currentRecord) state.currentRecord.multiResults = null;
   }
@@ -288,11 +307,13 @@ function setMode(mode) {
     $("mode-" + option).setAttribute("aria-selected", String(active));
     $("tool-" + option).hidden = !active;
   }
-  $("preview-empty-description").textContent = state.mode === "compress"
-    ? "Upload a PDF, choose a compression level, then preview the smaller result before downloading."
-    : state.mode === "multi-cut"
-      ? "Create named PDF pieces, allow overlapping pages, and preview one piece at a time before generating all of them."
-      : "Upload a PDF, choose the pages, then select Preview result to review the new page order.";
+  $("preview-empty-description").textContent = state.batchMode
+    ? "The same tool settings will be applied independently to each selected PDF. Preview each input before generating the batch."
+    : state.mode === "compress"
+      ? "Upload a PDF, choose a compression level, then preview the smaller result before downloading."
+      : state.mode === "multi-cut"
+        ? "Create named PDF pieces, allow overlapping pages, and preview one piece at a time before generating all of them."
+        : "Upload a PDF, choose the pages, then select Preview result to review the new page order.";
   if (state.mode === "multi-cut" && state.pageCount && !state.multiParts.length) {
     state.multiParts = [{ part_name: "Part 1", pages_range: "1-" + state.pageCount }];
   }
@@ -502,7 +523,7 @@ function renderMultiPreviewSelection(index) {
   renderPreviewGrid(part.entries);
 }
 
-function createPreviewEntries(pages, mode, position) {
+function createPreviewEntries(pages, mode, position, pageCount = state.pageCount) {
   if (mode === "cut") {
     return pages.map((pageNumber) => ({
       type: "source",
@@ -513,7 +534,7 @@ function createPreviewEntries(pages, mode, position) {
 
   const selected = new Set(pages);
   const entries = [];
-  for (let pageNumber = 1; pageNumber <= state.pageCount; pageNumber += 1) {
+  for (let pageNumber = 1; pageNumber <= pageCount; pageNumber += 1) {
     if (position === "before" && selected.has(pageNumber)) {
       entries.push({
         type: state.markerBytes ? "marker" : "blank",
@@ -643,10 +664,15 @@ function renderPreviewGrid(entries) {
 async function saveCurrentProject() {
   if (!state.remember || !state.currentRecord || !state.sourceBytes) return;
   const record = state.currentRecord;
-  record.sourceBytes = state.sourceBytes.slice();
+  const firstBatchInput = state.batchMode ? state.batchInputs[0] : null;
+  record.sourceBytes = firstBatchInput ? firstBatchInput.bytes.slice() : state.sourceBytes.slice();
   record.markerBytes = state.markerBytes ? state.markerBytes.slice() : null;
-  record.fileName = state.fileName;
-  record.pageCount = state.pageCount;
+  record.fileName = firstBatchInput ? firstBatchInput.name : state.fileName;
+  record.pageCount = state.batchMode ? (record.pageCount || state.pageCount) : state.pageCount;
+  record.batchMode = state.batchMode;
+  record.batchInputs = state.batchMode
+    ? state.batchInputs.map((input) => ({ name: input.name, bytes: input.bytes.slice() }))
+    : null;
   record.operation = state.mode;
   record.updatedAt = Date.now();
   record.markerFileName = state.markerFileName || "";
@@ -656,7 +682,7 @@ async function saveCurrentProject() {
   record.multiParts = state.mode === "multi-cut"
     ? state.multiParts.map((part) => ({ part_name: part.part_name, pages_range: part.pages_range }))
     : null;
-  record.multiResults = state.mode === "multi-cut" && state.multiResults.length
+  record.multiResults = (state.mode === "multi-cut" || state.batchMode) && state.multiResults.length
     ? state.multiResults.map((result) => ({
       part_name: result.part_name,
       outputName: result.outputName,
@@ -665,7 +691,8 @@ async function saveCurrentProject() {
       bytes: result.bytes.slice()
     }))
     : null;
-  if (state.mode === "multi-cut") {
+  record.batchErrors = state.batchMode ? state.batchErrors.slice() : [];
+  if (state.mode === "multi-cut" || state.batchMode) {
     record.outputBytes = null;
     record.outputName = null;
   }
@@ -710,6 +737,66 @@ function runCompressionWorker(sourceBytes, level, onProgress) {
   });
 }
 
+async function rasterizePdfBytes(sourceBytes, onProgress = () => {}) {
+  if (sourceBytes.byteLength > 256 * 1024 * 1024) {
+    throw new Error("Compression supports PDFs up to 256 MB to protect browser memory.");
+  }
+  const sourceDoc = await loadPdfDocument(sourceBytes);
+  const output = await PDFDocument.create();
+  const pageCount = sourceDoc.numPages;
+  const targetScale = 110 / 72;
+  const maxDimension = 2200;
+  const quality = 0.48;
+  try {
+    for (let index = 1; index <= pageCount; index += 1) {
+      const page = await sourceDoc.getPage(index);
+      const baseViewport = page.getViewport({ scale: 1 });
+      const scale = Math.min(targetScale, maxDimension / Math.max(baseViewport.width, baseViewport.height));
+      const viewport = page.getViewport({ scale });
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(1, Math.ceil(viewport.width));
+      canvas.height = Math.max(1, Math.ceil(viewport.height));
+      const context = canvas.getContext("2d", { alpha: false });
+      if (!context) throw new Error("Could not create a canvas for page rasterization.");
+      context.fillStyle = "#ffffff";
+      context.fillRect(0, 0, canvas.width, canvas.height);
+      await page.render({ canvasContext: context, viewport }).promise;
+      const blob = await new Promise((resolve, reject) => {
+        canvas.toBlob((value) => value ? resolve(value) : reject(new Error("Could not encode a rasterized page.")), "image/jpeg", quality);
+      });
+      const jpeg = new Uint8Array(await blob.arrayBuffer());
+      const embedded = await output.embedJpg(jpeg);
+      const outputPage = output.addPage([baseViewport.width, baseViewport.height]);
+      outputPage.drawImage(embedded, { x: 0, y: 0, width: baseViewport.width, height: baseViewport.height });
+      page.cleanup();
+      canvas.width = 0;
+      canvas.height = 0;
+      onProgress({
+        stage: "Rasterizing page " + index + " of " + pageCount + "…",
+        percent: Math.round(90 * index / pageCount)
+      });
+      await new Promise((resolve) => window.setTimeout(resolve, 0));
+    }
+    const rasterized = new Uint8Array(await output.save({ useObjectStreams: true }));
+    const improved = rasterized.length < sourceBytes.length;
+    return {
+      bytes: improved ? rasterized : sourceBytes.slice(),
+      originalSize: sourceBytes.length,
+      outputSize: improved ? rasterized.length : sourceBytes.length,
+      usedOriginal: !improved,
+      imagesReencoded: 0,
+      imagesSkipped: 0,
+      imageCount: 0,
+      level: "rasterize",
+      note: improved
+        ? "Pages were flattened to JPEG at up to 110 DPI. Text is no longer selectable; links, forms, annotations, layers, metadata, and accessibility structure are not preserved."
+        : "The rasterized copy was not smaller, so the original PDF is kept unchanged."
+    };
+  } finally {
+    await sourceDoc.destroy();
+  }
+}
+
 async function makeCompressionPreview() {
   invalidatePreview();
   try {
@@ -718,10 +805,13 @@ async function makeCompressionPreview() {
     $("compress-progress").value = 0;
     $("compress-progress-label").textContent = "Preparing the local compression engine…";
     const level = $("compress-level").value;
-    const result = await runCompressionWorker(state.sourceBytes, level, (progress) => {
+    const onProgress = (progress) => {
       $("compress-progress").value = progress.percent;
       $("compress-progress-label").textContent = progress.stage;
-    });
+    };
+    const result = level === "rasterize"
+      ? await rasterizePdfBytes(state.sourceBytes, onProgress)
+      : await runCompressionWorker(state.sourceBytes, level, onProgress);
     let compressedDoc = null;
     if (!result.usedOriginal) {
       compressedDoc = await loadPdfDocument(result.bytes);
@@ -750,7 +840,7 @@ async function makeCompressionPreview() {
     $("compress-stats").textContent = result.note ||
       (level === "lossless"
         ? "Lossless structural optimization; original image pixels preserved."
-        : result.imagesChanged + " embedded image(s) optimized. Text and page objects were not rasterized.");
+        : result.imagesReencoded + " of " + result.imageCount + " embedded image(s) recompressed; text and page objects were not rasterized.");
     renderPreviewGrid(entries);
     $("create-btn").disabled = false;
     await saveCurrentProject();
@@ -767,7 +857,164 @@ async function makeCompressionPreview() {
   }
 }
 
+function renderBatchPreviewSelection(index) {
+  return (async () => {
+    if (!state.batchPreviews.length) return;
+    const selected = Math.max(0, Math.min(Number(index) || 0, state.batchPreviews.length - 1));
+    state.batchIndex = selected;
+    const item = state.batchPreviews[selected];
+    if (state.sourceDoc) {
+      try { await state.sourceDoc.destroy(); } catch (_) {}
+    }
+    if (state.compressedPreviewDoc) {
+      try { await state.compressedPreviewDoc.destroy(); } catch (_) {}
+      state.compressedPreviewDoc = null;
+    }
+    state.sourceBytes = item.input.bytes;
+    state.fileName = item.input.name;
+    state.pageCount = item.pageCount;
+    state.sourceDoc = await loadPdfDocument(state.sourceBytes);
+    state.preview = item.preview;
+    $("file-name").textContent = state.fileName;
+    $("file-info").textContent = state.pageCount + " pages · batch input " + (selected + 1) + " of " + state.batchPreviews.length;
+    $("batch-preview-select").value = String(selected);
+    $("batch-preview-selector-wrap").hidden = state.batchPreviews.length < 2;
+
+    if (state.mode === "compress") {
+      if (!item.preview.usedOriginal) {
+        state.compressedPreviewDoc = await loadPdfDocument(item.preview.compressedBytes);
+      }
+      $("multi-preview-selector-wrap").hidden = true;
+      const savings = item.preview.originalSize - item.preview.outputSize;
+      $("preview-summary").textContent = savings
+        ? (100 * savings / item.preview.originalSize).toFixed(1) + "% smaller"
+        : "Already optimized";
+      $("preview-subsummary").textContent = item.input.name + " · " +
+        formatBytes(item.preview.originalSize) + " → " + formatBytes(item.preview.outputSize);
+      $("compress-stats").hidden = false;
+      $("compress-stats").textContent = item.preview.note || "Embedded images optimized.";
+      $("preview-status").textContent = "FILE " + (selected + 1) + " OF " + state.batchPreviews.length;
+      renderPreviewGrid(item.preview.entries);
+    } else if (state.mode === "multi-cut") {
+      const select = $("multi-preview-select");
+      select.replaceChildren();
+      item.preview.parts.forEach((part, partIndex) => {
+        const option = document.createElement("option");
+        option.value = String(partIndex);
+        option.textContent = "Part " + (partIndex + 1) + " — " + part.part_name + " (" + part.pages.length + " pages)";
+        select.appendChild(option);
+      });
+      $("multi-preview-selector-wrap").hidden = false;
+      renderMultiPreviewSelection(0);
+      $("preview-subsummary").textContent = item.input.name + " · " + $("preview-subsummary").textContent;
+    } else {
+      $("multi-preview-selector-wrap").hidden = true;
+      $("compress-stats").hidden = true;
+      $("preview-summary").textContent = item.preview.entries.length + " output " +
+        (item.preview.entries.length === 1 ? "page" : "pages");
+      $("preview-subsummary").textContent = state.mode === "cut"
+        ? item.preview.pages.length + " selected from " + item.pageCount + " original pages · " + item.input.name
+        : item.preview.pages.length + " marker pages inserted · " + item.pageCount + " originals kept · " + item.input.name;
+      $("preview-status").textContent = "FILE " + (selected + 1) + " OF " + state.batchPreviews.length;
+      renderPreviewGrid(item.preview.entries);
+    }
+    $("create-btn").disabled = false;
+  })();
+}
+
+async function makeBatchPreview() {
+  if (!state.batchInputs.length) {
+    showToast("There are no selected PDFs to process.", "error");
+    return;
+  }
+  const previews = [];
+  try {
+    setBusy(true, "Preparing batch previews…");
+    if (state.mode === "compress") $("compress-progress-panel").hidden = false;
+    for (let index = 0; index < state.batchInputs.length; index += 1) {
+      const input = state.batchInputs[index];
+      $("preview-btn").textContent = "Checking " + (index + 1) + " of " + state.batchInputs.length + "…";
+      const sourceDoc = await loadPdfDocument(input.bytes);
+      const pageCount = sourceDoc.numPages;
+      await sourceDoc.destroy();
+      let preview;
+      if (state.mode === "multi-cut") {
+        const validated = validateMultiParts(state.multiParts, pageCount);
+        preview = {
+          mode: "multi-cut",
+          parts: validated.map((part) => ({
+            part_name: part.part_name,
+            pages_range: part.pages_range,
+            pages: part.pages,
+            outputName: createMultiOutputName(input.name, part.part_name),
+            entries: part.pages.map((pageNumber) => ({
+              type: "source", pageNumber,
+              label: part.part_name + " · Original page " + pageNumber
+            }))
+          }))
+        };
+      } else if (state.mode === "compress") {
+        const level = $("compress-level").value;
+        const onProgress = (progress) => {
+          $("compress-progress").value = Math.round(((index + progress.percent / 100) / state.batchInputs.length) * 100);
+          $("compress-progress-label").textContent = input.name + " · " + progress.stage;
+        };
+        const result = level === "rasterize"
+          ? await rasterizePdfBytes(input.bytes, onProgress)
+          : await runCompressionWorker(input.bytes, level, onProgress);
+        preview = {
+          mode: "compress", compressedBytes: result.bytes, usedOriginal: result.usedOriginal,
+          originalSize: result.originalSize, outputSize: result.outputSize,
+          imagesReencoded: result.imagesReencoded || 0, imageCount: result.imageCount || 0,
+          note: result.note, quality: level,
+          entries: Array.from({ length: pageCount }, (_, pageIndex) => ({
+            type: "compressed", pageNumber: pageIndex + 1, label: "Output page " + (pageIndex + 1)
+          }))
+        };
+      } else {
+        const raw = state.mode === "cut" ? $("cut-pages").value : $("marker-pages").value;
+        const pages = parsePageSpec(raw, pageCount);
+        const position = $("marker-position").value;
+        preview = {
+          mode: state.mode, pages, position,
+          entries: createPreviewEntries(pages, state.mode, position, pageCount),
+          pageSpec: raw, hasCustomMarker: Boolean(state.markerBytes)
+        };
+      }
+      previews.push({ input, pageCount, preview });
+    }
+    state.batchPreviews = previews;
+    state.batchIndex = 0;
+    const select = $("batch-preview-select");
+    select.replaceChildren();
+    previews.forEach((item, index) => {
+      const option = document.createElement("option");
+      option.value = String(index);
+      option.textContent = (index + 1) + ". " + item.input.name + " (" + item.pageCount + " pages)";
+      select.appendChild(option);
+    });
+    $("preview-empty").hidden = true;
+    $("preview-content").hidden = false;
+    $("batch-preview-selector-wrap").hidden = previews.length < 2;
+    await renderBatchPreviewSelection(0);
+    await saveCurrentProject();
+    showToast(previews.length + " PDFs are ready. Switch the preview dropdown to inspect each input before generating results.", "success");
+  } catch (error) {
+    state.batchPreviews = [];
+    state.preview = null;
+    $("create-btn").disabled = true;
+    showToast(error.message || "Could not prepare all batch previews.", "error");
+  } finally {
+    $("compress-progress-panel").hidden = true;
+    setBusy(false);
+  }
+}
+
 async function makePreview() {
+  if (state.batchMode) {
+    await makeBatchPreview();
+    return;
+  }
   if (!state.sourceDoc || !state.sourceBytes) {
     showToast("Choose a source PDF first.", "error");
     return;
@@ -885,6 +1132,171 @@ async function createMultipleCutOutputs(preview) {
   return results;
 }
 
+function showNextJobPanel(outputs) {
+  const normalized = (outputs || []).filter((item) => item && item.bytes).map((item) => ({
+    name: item.outputName || item.name || "output.pdf",
+    bytes: item.bytes instanceof Uint8Array ? item.bytes.slice() : new Uint8Array(item.bytes),
+    pageCount: item.pageCount || null
+  }));
+  state.nextJobSources = normalized;
+  const panel = $("next-job-panel");
+  panel.hidden = normalized.length === 0;
+  $("next-job-setup").hidden = true;
+  $("next-job-inputs-wrap").hidden = normalized.length < 2;
+  $("next-job-yes").hidden = false;
+  $("next-job-no").hidden = false;
+}
+
+function renderNextJobInputs() {
+  const list = $("next-job-inputs");
+  list.replaceChildren();
+  state.nextJobSources.forEach((input, index) => {
+    const label = document.createElement("label");
+    label.className = "next-job-input-option";
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.checked = true;
+    checkbox.value = String(index);
+    checkbox.dataset.inputIndex = String(index);
+    const name = document.createElement("span");
+    name.textContent = input.name + (input.pageCount ? " · " + input.pageCount + " pages" : "");
+    label.append(checkbox, name);
+    list.appendChild(label);
+  });
+}
+
+async function startNextJob() {
+  let selected = state.nextJobSources.slice();
+  if (selected.length > 1) {
+    const checked = Array.from($("next-job-inputs").querySelectorAll("input[type=checkbox]:checked"));
+    selected = checked.map((checkbox) => state.nextJobSources[Number(checkbox.dataset.inputIndex)]).filter(Boolean);
+  }
+  if (!selected.length) {
+    showToast("Select at least one PDF to continue.", "error");
+    return;
+  }
+  const targetMode = $("next-job-tool").value;
+  state.batchMode = selected.length > 1;
+  state.batchInputs = state.batchMode
+    ? selected.map((input) => ({ name: input.name, bytes: input.bytes.slice() }))
+    : [];
+  state.batchPreviews = [];
+  state.batchErrors = [];
+  state.batchIndex = 0;
+  state.multiResults = [];
+  state.nextJobSources = [];
+  $("next-job-panel").hidden = true;
+  $("next-job-setup").hidden = true;
+  setMode(targetMode);
+  const first = selected[0];
+  const file = new File([first.bytes], first.name, { type: "application/pdf" });
+  await handleSourceFile(file, { preserveBatch: true });
+  if (targetMode === "multi-cut") {
+    state.multiParts = [{ part_name: "Part 1", pages_range: "1-" + state.pageCount }];
+    renderMultiParts();
+  }
+  if (state.batchMode && state.currentRecord) {
+    state.currentRecord.batchMode = true;
+    state.currentRecord.batchInputs = state.batchInputs.map((input) => ({ name: input.name, bytes: input.bytes.slice() }));
+    await saveCurrentProject();
+  }
+  showToast(state.batchMode
+    ? selected.length + " PDFs loaded into " + targetMode + ". The same settings will be applied to each file separately."
+    : first.name + " loaded directly into " + targetMode + ".", "success");
+}
+
+function reserveBatchOutputName(candidate, usedNames) {
+  const normalized = String(candidate || "output.pdf");
+  const base = normalized.replace(/\.pdf$/i, "");
+  let name = normalized;
+  let suffix = 2;
+  while (usedNames.has(name.toLocaleLowerCase())) {
+    name = base + " (" + suffix + ").pdf";
+    suffix += 1;
+  }
+  usedNames.add(name.toLocaleLowerCase());
+  return name;
+}
+
+async function createBatchOutputs() {
+  const results = [];
+  const errors = [];
+  const usedNames = new Set();
+  const markerDocument = state.mode === "marker" && state.markerBytes
+    ? await PDFDocument.load(state.markerBytes.slice())
+    : null;
+  for (let index = 0; index < state.batchPreviews.length; index += 1) {
+    const item = state.batchPreviews[index];
+    const input = item.input;
+    const preview = item.preview;
+    $("create-btn").textContent = "Processing file " + (index + 1) + " of " + state.batchPreviews.length + "…";
+    try {
+      if (state.mode === "compress") {
+        results.push({
+          part_name: input.name,
+          outputName: reserveBatchOutputName(baseName(input.name) + "-compressed.pdf", usedNames),
+          pageCount: item.pageCount,
+          pages: [],
+          bytes: preview.compressedBytes.slice()
+        });
+        continue;
+      }
+      const sourceDocument = await PDFDocument.load(input.bytes.slice());
+      if (state.mode === "multi-cut") {
+        for (const part of preview.parts) {
+          const output = await PDFDocument.create();
+          const indexes = part.pages.map((pageNumber) => pageNumber - 1);
+          const copied = await output.copyPages(sourceDocument, indexes);
+          copied.forEach((page) => output.addPage(page));
+          const bytes = new Uint8Array(await output.save());
+          const check = await PDFDocument.load(bytes);
+          if (check.getPageCount() !== part.pages.length) throw new Error('Output validation failed for "' + part.outputName + '".');
+          results.push({
+            part_name: part.part_name, sourceName: input.name,
+            outputName: reserveBatchOutputName(part.outputName, usedNames),
+            pageCount: check.getPageCount(), pages: part.pages.slice(), bytes
+          });
+        }
+        continue;
+      }
+      const output = await PDFDocument.create();
+      let outputName;
+      if (state.mode === "cut") {
+        const indexes = preview.pages.map((pageNumber) => pageNumber - 1);
+        const copied = await output.copyPages(sourceDocument, indexes);
+        copied.forEach((page) => output.addPage(page));
+        outputName = reserveBatchOutputName(baseName(input.name) + "-cut.pdf", usedNames);
+      } else {
+        const originalPages = await output.copyPages(sourceDocument, sourceDocument.getPageIndices());
+        const selected = new Set(preview.pages);
+        for (let pageIndex = 0; pageIndex < originalPages.length; pageIndex += 1) {
+          const pageNumber = pageIndex + 1;
+          if (selected.has(pageNumber) && preview.position === "before") {
+            await createMarkerPage(output, markerDocument, sourceDocument, pageIndex);
+          }
+          output.addPage(originalPages[pageIndex]);
+          if (selected.has(pageNumber) && preview.position === "after") {
+            await createMarkerPage(output, markerDocument, sourceDocument, pageIndex);
+          }
+        }
+        outputName = reserveBatchOutputName(baseName(input.name) + "-with-markers.pdf", usedNames);
+      }
+      const bytes = new Uint8Array(await output.save());
+      const check = await PDFDocument.load(bytes);
+      results.push({
+        part_name: input.name, outputName, pageCount: check.getPageCount(),
+        pages: preview.pages.slice(), bytes
+      });
+    } catch (error) {
+      errors.push({ fileName: input.name, message: error?.message || "Processing failed." });
+    }
+  }
+  if (!results.length) {
+    throw new Error(errors.map((item) => item.fileName + ": " + item.message).join("\n") || "No batch outputs were generated.");
+  }
+  return { results, errors };
+}
+
 async function createOutput() {
   if (!state.preview || !state.sourceBytes) {
     showToast("Create a fresh preview before generating the PDF.", "error");
@@ -893,7 +1305,34 @@ async function createOutput() {
 
   const preview = state.preview;
   try {
-    setBusy(true, preview.mode === "multi-cut" ? "Creating pieces…" : "Creating PDF…");
+    setBusy(true, state.batchMode ? "Processing selected PDFs…" : preview.mode === "multi-cut" ? "Creating pieces…" : "Creating PDF…");
+    if (state.batchMode) {
+      const batch = await createBatchOutputs();
+      state.multiResults = batch.results;
+      state.batchErrors = batch.errors;
+      if (!state.currentRecord) {
+        state.currentRecord = {
+          id: (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + "-" + Math.random().toString(16).slice(2)),
+          createdAt: Date.now()
+        };
+      }
+      state.currentRecord.batchMode = true;
+      state.currentRecord.batchInputs = state.batchInputs.map((input) => ({ name: input.name, bytes: input.bytes.slice() }));
+      state.currentRecord.batchErrors = batch.errors;
+      state.currentRecord.outputBytes = null;
+      state.currentRecord.outputName = null;
+      state.currentRecord.operation = state.mode;
+      state.currentRecord.multiResults = batch.results;
+      state.currentRecord.updatedAt = Date.now();
+      setResultReady(null);
+      setMultiResultReady(state.currentRecord);
+      await saveCurrentProject();
+      showNextJobPanel(batch.results);
+      showToast(batch.errors.length
+        ? batch.results.length + " results generated; " + batch.errors.length + " file(s) could not be processed."
+        : batch.results.length + " results generated successfully.", batch.errors.length ? "info" : "success");
+      return;
+    }
     if (preview.mode === "multi-cut") {
       const results = await createMultipleCutOutputs(preview);
       state.multiResults = results;
@@ -916,6 +1355,7 @@ async function createOutput() {
       setResultReady(null);
       setMultiResultReady(state.currentRecord);
       await saveCurrentProject();
+      showNextJobPanel(results);
       showToast(results.length + " PDF pieces generated. Download them individually or as one ZIP.", "success");
       return;
     }
@@ -975,6 +1415,7 @@ async function createOutput() {
     setMultiResultReady(null);
     await saveCurrentProject();
     downloadPdf(resultBytes, outputName);
+    showNextJobPanel([{ name: outputName, outputName, bytes: resultBytes, pageCount: outputPageCount }]);
     showToast("Your PDF was created and downloaded.", "success");
   } catch (error) {
     console.error(error);
@@ -989,8 +1430,19 @@ async function loadPdfDocument(bytes) {
   return task.promise;
 }
 
-async function handleSourceFile(file) {
+async function handleSourceFile(file, options = {}) {
   if (!file) return;
+  const preserveBatch = options.preserveBatch === true;
+  if (!preserveBatch) {
+    state.batchMode = false;
+    state.batchInputs = [];
+    state.batchPreviews = [];
+    state.batchErrors = [];
+    state.batchIndex = 0;
+    state.nextJobSources = [];
+    $("next-job-panel").hidden = true;
+    $("next-job-setup").hidden = true;
+  }
   if (!(file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf"))) {
     showToast("Choose a PDF file.", "error");
     return;
@@ -1015,10 +1467,11 @@ async function handleSourceFile(file) {
     state.markerBytes = null;
     state.markerDoc = null;
     state.markerFileName = "";
-    if (!state.multiParts.length) {
-      state.multiParts = [{ part_name: "Part 1", pages_range: "1-" + documentToLoad.numPages }];
-    }
+    state.multiParts = [{ part_name: "Part 1", pages_range: "1-" + documentToLoad.numPages }];
     state.multiResults = [];
+    state.batchPreviews = [];
+    state.batchErrors = [];
+    state.batchIndex = 0;
     renderMultiParts();
     setMultiResultReady(null);
     $("marker-file-input").value = "";
@@ -1118,9 +1571,10 @@ async function loadHistory() {
       const title = document.createElement("strong");
       title.textContent = record.fileName || "Untitled PDF";
       const detail = document.createElement("span");
-      const operation = record.operation === "marker" ? "PDF marker"
-        : record.operation === "compress" ? "PDF compressor"
-          : record.operation === "multi-cut" ? "PDF multiple cuts" : "PDF cutter";
+      const operation = record.batchMode ? "PDF multitool batch"
+        : record.operation === "marker" ? "PDF marker"
+          : record.operation === "compress" ? "PDF compressor"
+            : record.operation === "multi-cut" ? "PDF multiple cuts" : "PDF cutter";
       detail.textContent = operation + " · " + (record.pageCount || "—") + " original pages · " + formatDate(record.updatedAt || record.createdAt);
       copy.append(title, detail);
 
@@ -1142,7 +1596,7 @@ async function loadHistory() {
         downloadButton.title = hasParts ? "Download all saved pieces as ZIP" : "Download saved result";
         downloadButton.setAttribute("aria-label", downloadButton.title);
         downloadButton.addEventListener("click", () => hasParts
-          ? downloadMultiZip(record.multiResults, record.fileName)
+          ? downloadMultiZip(record.multiResults, record.fileName, record.batchMode ? "Results" : "Split Parts")
           : downloadPdf(record.outputBytes, record.outputName || "pdf-cutter-output.pdf"));
         actions.appendChild(downloadButton);
       }
@@ -1188,6 +1642,13 @@ async function openSavedProject(id) {
     }
 
     state.currentRecord = record;
+    state.batchMode = Boolean(record.batchMode);
+    state.batchInputs = Array.isArray(record.batchInputs)
+      ? record.batchInputs.map((input) => ({ name: input.name, bytes: new Uint8Array(input.bytes) }))
+      : [];
+    state.batchPreviews = [];
+    state.batchErrors = Array.isArray(record.batchErrors) ? record.batchErrors.slice() : [];
+    state.batchIndex = 0;
     state.sourceBytes = new Uint8Array(record.sourceBytes);
     state.sourceDoc = await loadPdfDocument(state.sourceBytes);
     state.fileName = record.fileName || "saved-document.pdf";
@@ -1219,6 +1680,11 @@ async function openSavedProject(id) {
     invalidatePreview();
     setResultReady(record);
     setMultiResultReady(record);
+    if (Array.isArray(record.multiResults) && record.multiResults.length) {
+      showNextJobPanel(record.multiResults);
+    } else if (record.outputBytes) {
+      showNextJobPanel([{ name: record.outputName, bytes: record.outputBytes, pageCount: record.outputPageCount }]);
+    }
     showToast("Saved project opened from this browser.", "success");
   } catch (error) {
     showToast(error.message || "Could not open the saved project.", "error");
@@ -1242,6 +1708,15 @@ function resetWorkspace() {
   state.preview = null;
   state.multiParts = [{ part_name: "Part 1", pages_range: "" }];
   state.multiResults = [];
+  state.batchMode = false;
+  state.batchInputs = [];
+  state.batchPreviews = [];
+  state.batchErrors = [];
+  state.batchIndex = 0;
+  state.nextJobSources = [];
+  $("next-job-panel").hidden = true;
+  $("next-job-setup").hidden = true;
+  $("batch-preview-selector-wrap").hidden = true;
   if (state.compressedPreviewDoc) state.compressedPreviewDoc.destroy().catch(() => {});
   state.compressedPreviewDoc = null;
 
@@ -1295,7 +1770,18 @@ function initEvents() {
   $("multi-parts-list").addEventListener("change", handleMultiPartsChange);
   $("multi-parts-list").addEventListener("click", handleMultiPartsClick);
   $("multi-preview-select").addEventListener("change", (event) => renderMultiPreviewSelection(event.target.value));
-  $("download-multi-zip").addEventListener("click", () => downloadMultiZip(state.multiResults, state.fileName));
+  $("batch-preview-select").addEventListener("change", (event) => renderBatchPreviewSelection(event.target.value));
+  $("download-multi-zip").addEventListener("click", () => downloadMultiZip(state.multiResults, state.fileName, state.batchMode ? "Results" : "Split Parts"));
+  $("next-job-yes").addEventListener("click", () => {
+    renderNextJobInputs();
+    $("next-job-inputs-wrap").hidden = state.nextJobSources.length < 2;
+    $("next-job-setup").hidden = false;
+  });
+  $("next-job-no").addEventListener("click", () => {
+    $("next-job-panel").hidden = true;
+    state.nextJobSources = [];
+  });
+  $("next-job-start").addEventListener("click", startNextJob);
 
   $("dropzone").addEventListener("click", (event) => {
     if (event.target.id !== "source-file") showFilePicker();

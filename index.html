@@ -169,9 +169,11 @@
               <select id="compress-level" class="text-input select-input">
                 <option value="lossless">Lossless — preserve image pixels</option>
                 <option value="balanced" selected>Balanced — smaller images, good quality</option>
-                <option value="maximum">Maximum — smallest images, lower quality</option>
+                <option value="maximum">Maximum — smaller images, lower quality</option>
+                <option value="rasterize">Extreme — flatten pages for maximum reduction</option>
               </select>
-              <p class="helper-text">Lossless optimizes the PDF structure. Balanced and Maximum also recompress compatible embedded images, while keeping text selectable and leaving unsupported images untouched.</p>
+              <p class="helper-text">Lossless optimizes PDF structure. Balanced and Maximum recompress compatible embedded images while keeping text selectable.</p>
+              <p class="helper-text compression-raster-warning"><strong>Extreme is different:</strong> it converts every page into an image. Text will no longer be selectable, and links, forms, annotations, layers, metadata, and accessibility structure will be lost. Use it only when a much smaller file matters more than editability.</p>
               <p class="helper-text">Results vary by document. No PDF is uploaded. A 256 MB input limit protects browser memory; encrypted PDFs and digital signatures may require special care.</p>
               <div id="compress-progress-panel" class="compress-progress-panel" role="status" aria-live="polite" hidden>
                 <span id="compress-progress-label">Preparing compression…</span>
@@ -208,6 +210,10 @@
               <div class="preview-steps"><span>1. Upload</span><i>→</i><span>2. Choose tool</span><i>→</i><span>3. Preview</span></div>
             </div>
             <div id="preview-content" hidden>
+              <div id="batch-preview-selector-wrap" class="multi-preview-selector-wrap" hidden>
+                <label for="batch-preview-select">Preview one input PDF</label>
+                <select id="batch-preview-select" class="text-input select-input"></select>
+              </div>
               <div id="multi-preview-selector-wrap" class="multi-preview-selector-wrap" hidden>
                 <label for="multi-preview-select">Preview one piece</label>
                 <select id="multi-preview-select" class="text-input select-input"></select>
@@ -235,7 +241,33 @@
                 <button id="download-multi-zip" class="primary-button" type="button">Download all as ZIP ↓</button>
               </div>
               <div id="multi-results-list" class="multi-results-list"></div>
+              <p id="batch-result-errors" class="batch-result-errors" hidden></p>
             </div>
+            <section id="next-job-panel" class="next-job-panel" hidden>
+              <div class="next-job-question">
+                <strong>Do you want another job?</strong>
+                <span>Send the file you just created straight to another PDF tool. No re-upload needed.</span>
+              </div>
+              <div class="next-job-choices">
+                <button id="next-job-yes" class="primary-button" type="button">Yes, another job</button>
+                <button id="next-job-no" class="secondary-button" type="button">No, I'm done</button>
+              </div>
+              <div id="next-job-setup" class="next-job-setup" hidden>
+                <div class="field-heading"><label for="next-job-tool">Choose the next tool</label></div>
+                <select id="next-job-tool" class="text-input select-input">
+                  <option value="cut">PDF cutter</option>
+                  <option value="marker">PDF marker</option>
+                  <option value="compress">PDF compressor</option>
+                  <option value="multi-cut">Multiple cuts</option>
+                </select>
+                <div id="next-job-inputs-wrap" class="next-job-inputs-wrap" hidden>
+                  <div class="field-heading"><strong>Which generated PDFs should continue?</strong><span class="field-hint">All selected by default</span></div>
+                  <div id="next-job-inputs" class="next-job-inputs"></div>
+                  <p class="helper-text">The same settings will be applied separately to every selected PDF. Page ranges must exist in each selected file.</p>
+                </div>
+                <button id="next-job-start" class="primary-button next-job-start" type="button">Continue to this tool →</button>
+              </div>
+            </section>
           </section>
         </div>
 

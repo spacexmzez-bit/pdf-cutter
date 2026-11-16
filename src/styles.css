@@ -289,3 +289,44 @@ button:disabled { cursor: not-allowed; opacity: .48; }
   .history-open { padding: 0 7px; }
   .footer { flex-direction: column; gap: 6px; }
 }
+
+
+/* Compression: make the rasterization trade-off hard to miss. */
+.compression-raster-warning {
+  padding: 10px 12px;
+  border: 1px solid rgba(230, 177, 111, .35);
+  border-radius: 8px;
+  color: #d9c29f;
+  background: rgba(160, 112, 56, .09);
+}
+.compression-raster-warning strong { color: #f0d2a5; }
+
+/* Multi-tool hand-off and batch preview. */
+#batch-preview-selector-wrap { margin-bottom: 14px; }
+.next-job-panel {
+  margin-top: 16px;
+  padding: 16px;
+  border: 1px solid rgba(145, 190, 163, .25);
+  border-radius: 12px;
+  background: rgba(38, 55, 47, .28);
+}
+.next-job-question { display: flex; flex-direction: column; gap: 5px; }
+.next-job-question strong { color: #dceee4; font-size: 13px; }
+.next-job-question span { color: #91a69a; font-size: 10px; line-height: 1.5; }
+.next-job-choices { display: flex; flex-wrap: wrap; gap: 9px; margin-top: 13px; }
+.next-job-choices .secondary-button { min-height: 39px; }
+.next-job-setup { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); }
+.next-job-inputs-wrap { margin-top: 14px; }
+.next-job-inputs { display: flex; flex-direction: column; gap: 7px; max-height: 230px; overflow: auto; padding: 10px; border: 1px solid var(--line); border-radius: 8px; }
+.next-job-input-option { display: flex; align-items: center; gap: 9px; min-width: 0; color: #c6d0cb; font-size: 10px; }
+.next-job-input-option input { accent-color: var(--mint); flex: 0 0 auto; }
+.next-job-input-option span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.next-job-start { margin-top: 14px; width: 100%; }
+.multi-results-heading.batch-results .multi-results-heading-copy { min-width: 0; }
+@media (max-width: 600px) {
+  .next-job-panel { padding: 13px; }
+  .next-job-choices { display: grid; grid-template-columns: 1fr 1fr; }
+  .next-job-choices button { width: 100%; }
+}
+
+.batch-result-errors { margin: 12px 0 0; padding: 10px 12px; border: 1px solid rgba(220,155,115,.3); border-radius: 8px; color: #d6b49b; background: rgba(160,90,56,.08); font-size: 10px; line-height: 1.5; }

@@ -4,7 +4,8 @@ A browser-based PDF utility for extracting selected pages and inserting marker p
 
 ## Features
 
-- **PDF compressor:** lossless structural optimization or balanced/maximum embedded-image compression, with before/after size, a page preview, and a no-growth safeguard. Uses the qpdf WebAssembly engine locally, without rasterizing whole pages.
+- **PDF compressor:** lossless structural optimization, balanced/maximum embedded-image recompression, or an explicit Extreme rasterization mode for scanned/image-heavy PDFs. Includes before/after size, a page preview, and a no-growth safeguard.
+- **Multitool workflow:** after any generated result, continue directly into another tool without manually re-uploading. When the previous job created multiple PDFs, select all or only some pieces and apply the next tool to each file separately. Batch results support individual downloads and one ZIP.
 - **PDF cutter:** keep individual pages, ranges, or multiple ranges such as 1-37, 88-119.
 - **Multiple Cuts:** split one PDF into up to 50 named PDF pieces, each with its own page ranges. Pieces may overlap, so shared cover pages can appear in multiple outputs. Preview one piece at a time, download pieces individually, or package all of them into a ZIP.
 - **JSON piece import:** import a JSON file or pasted JSON array using exactly two fields per piece: `part_name` and `pages_range`. The Copy JSON format button copies a blank reusable structure.
@@ -17,9 +18,9 @@ A browser-based PDF utility for extracting selected pages and inserting marker p
 
 ## Compression design
 
-The compressor runs **qpdf WebAssembly** in a dedicated browser worker. Lossless mode rewrites the PDF structure without changing image pixels. Balanced and Maximum additionally re-encode compatible embedded RGB/grayscale images as JPEG, with optional downsampling. Text, links, and other PDF objects are not flattened into page images.
+The compressor runs **qpdf WebAssembly** in a dedicated browser worker. Lossless mode rewrites the PDF structure without changing image pixels. Balanced and Maximum additionally re-encode compatible embedded RGB/grayscale, indexed, and supported ICCBased images as JPEG, with downsampling. The compressor reports how many image objects it could recompress and why it retained the original when no safe reduction was found. Text, links, and other PDF objects are not flattened into page images.
 
-**Limits:** Not every PDF becomes smaller. If the optimized result is not smaller, the original bytes are kept. Unsupported, masked, ICC/CMYK, JPEG2000, JBIG2, and complex image encodings are left untouched. Very large or complex PDFs can exceed browser memory; the compressor limits input files to 256 MB. Rewriting a digitally signed PDF can invalidate signatures. Always inspect the preview before downloading, and retain the original document. PDF metadata and complex interactive features should be verified on important documents.
+**Limits:** Not every PDF becomes smaller. If the optimized result is not smaller, the original bytes are kept. Unsupported masks, CMYK, JPEG2000, JBIG2, CCITT fax, and complex image encodings are left untouched by the non-rasterizing modes. Extreme mode can handle pages containing those formats by rendering each page to a JPEG image at up to 110 DPI, but it permanently flattens text and vector content; links, forms, annotations, layers, metadata, and accessibility structure are not preserved. Use Extreme only when editability is not required. Very large or complex PDFs can exceed browser memory; the compressor limits input files to 256 MB. Rewriting a digitally signed PDF can invalidate signatures. Always inspect the preview before downloading, and retain the original document.
 
 The image stream engine is [@lipoe/browser-qpdf](https://github.com/lipoe/browser-qpdf) v0.3.1 (Apache-2.0), based on qpdf 12.4.2. Redistribution notices are included under `public/licenses/`. The rest of PDF Cutter remains MIT-licensed.
 
