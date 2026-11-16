@@ -5,7 +5,7 @@ A browser-based PDF utility for extracting selected pages and inserting marker p
 ## Features
 
 - **PDF compressor:** lossless structural optimization, balanced/maximum embedded-image recompression, or an explicit Extreme rasterization mode for scanned/image-heavy PDFs. Includes before/after size, a page preview, and a no-growth safeguard.
-- **Multitool workflow:** after any generated result, continue directly into another tool without manually re-uploading. When the previous job created multiple PDFs, select all or only some pieces and apply the next tool to each file separately. Batch results support individual downloads and one ZIP.
+- **Multitool workflow:** after any generated result, continue directly into another tool without manually re-uploading. When the previous job created multiple PDFs, select all or only some pieces and apply the next tool to each file separately. Batch inputs are limited to 256 MB combined to protect browser memory; results support individual downloads and one ZIP.
 - **PDF cutter:** keep individual pages, ranges, or multiple ranges such as 1-37, 88-119.
 - **Multiple Cuts:** split one PDF into up to 50 named PDF pieces, each with its own page ranges. Pieces may overlap, so shared cover pages can appear in multiple outputs. Preview one piece at a time, download pieces individually, or package all of them into a ZIP.
 - **JSON piece import:** import a JSON file or pasted JSON array using exactly two fields per piece: `part_name` and `pages_range`. The Copy JSON format button copies a blank reusable structure.

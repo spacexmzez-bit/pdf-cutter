@@ -1135,7 +1135,7 @@ async function createMultipleCutOutputs(preview) {
 function showNextJobPanel(outputs) {
   const normalized = (outputs || []).filter((item) => item && item.bytes).map((item) => ({
     name: item.outputName || item.name || "output.pdf",
-    bytes: item.bytes instanceof Uint8Array ? item.bytes.slice() : new Uint8Array(item.bytes),
+    bytes: item.bytes instanceof Uint8Array ? item.bytes : new Uint8Array(item.bytes),
     pageCount: item.pageCount || null
   }));
   state.nextJobSources = normalized;
@@ -1176,9 +1176,14 @@ async function startNextJob() {
     return;
   }
   const targetMode = $("next-job-tool").value;
+  const selectedBytes = selected.reduce((total, input) => total + input.bytes.byteLength, 0);
+  if (selected.length > 1 && selectedBytes > 256 * 1024 * 1024) {
+    showToast("The selected batch exceeds 256 MB combined. Select fewer PDFs and run smaller batches.", "error");
+    return;
+  }
   state.batchMode = selected.length > 1;
   state.batchInputs = state.batchMode
-    ? selected.map((input) => ({ name: input.name, bytes: input.bytes.slice() }))
+    ? selected.map((input) => ({ name: input.name, bytes: input.bytes }))
     : [];
   state.batchPreviews = [];
   state.batchErrors = [];
